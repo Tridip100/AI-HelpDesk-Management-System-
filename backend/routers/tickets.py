@@ -2,23 +2,23 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 
-from app.database import get_db
-from app.models.user import User, UserRole
-from app.models.ticket import Ticket, TicketStatus, TicketCategory, TicketPriority
-from app.models.ticket_event import EventAction
-from app.schemas.ticket import (
+from backend.database import get_db
+from backend.models.user import User, UserRole
+from backend.models.ticket import Ticket, TicketStatus, TicketCategory, TicketPriority
+from backend.models.ticket_event import EventAction
+from backend.schemas.ticket import (
     TicketCreateRequest, TicketUpdateRequest, TicketAssignRequest,
     TicketResolveRequest, RollbackRequest, CSATRequest, TicketOut
 )
-from app.middleware.rbac import (
+from backend.middleware.rbac import (
     current_user_any, current_user_helpdesk_or_above,
     current_user_engineer_or_above, current_user_admin
 )
-from app.services.ticket_service import (
+from backend.services.ticket_service import (
     create_ticket, apply_ai_classification, assign_to_engineer,
     resolve_ticket, rollback_ticket, log_event, get_tickets_for_user
 )
-from app.services.routing_service import decide_routing_path, find_best_engineer
+from backend.services.routing_service import decide_routing_path, find_best_engineer
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
