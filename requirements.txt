@@ -11,3 +11,7 @@ python-dotenv==1.0.1
 python-multipart==0.0.9
 alembic==1.13.1
 psycopg[binary]
+pg8000
+openai-whisper
+ffmpeg
+bcrypt==3.2.2

@@ -17,4 +17,7 @@ dependencies = [
     "python-multipart==0.0.9",
     "alembic==1.13.1",
     "psycopg[binary]>=3.3.4",
+    "pg8000>=1.31.5",
+    "openai-whisper>=20250625",
+    "ffmpeg>=1.4",
 ]
