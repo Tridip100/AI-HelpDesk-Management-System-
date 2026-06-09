@@ -8,10 +8,10 @@ Usage:
 import sys
 sys.path.append(".")
 
-from backend.database import SessionLocal, engine, Base
-from backend.models import user, ticket, ticket_event  # noqa — register models
-from backend.models.user import User, UserRole
-from backend.services.auth_service import hash_password
+from .database import SessionLocal, engine, Base
+from .models import user, ticket, ticket_event  # noqa — register models
+from .models.user import User, UserRole
+from .services.auth_service import hash_password
 
 Base.metadata.create_all(bind=engine)
 
