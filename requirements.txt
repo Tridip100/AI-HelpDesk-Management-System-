@@ -15,3 +15,9 @@ pg8000
 openai-whisper
 ffmpeg
 bcrypt==3.2.2
+transformers
+torch
+vaderSentiment 
+spacy
+test_llm.py 
+test_nlp.py 
