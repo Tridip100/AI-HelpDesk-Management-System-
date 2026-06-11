@@ -12,6 +12,7 @@ from backend.routers import auth, tickets, admin
 from backend.routers.intake import router as intake_router
 from backend.channels.imap_poller import start_poller
 from backend.models import user, ticket, ticket_event
+from backend.services.llm_services import check_ollama_health
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,7 +51,30 @@ app = FastAPI(
     version="0.1.0",          # ← comma was missing here
     lifespan=lifespan          # ← now defined above
 )
+# in backend/main.py — update lifespan
 
+from backend.services.llm_services import check_ollama_health
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("[MAIN] Starting AI Helpdesk backend...")
+
+    # Check Ollama
+    ollama_ok = await check_ollama_health()
+    if not ollama_ok:
+        logger.warning("[MAIN] Ollama not ready — LLM features disabled")
+
+    # Start IMAP poller
+    poller_task = asyncio.create_task(start_poller())
+    logger.info("[MAIN] IMAP poller started")
+
+    yield
+
+    poller_task.cancel()
+    try:
+        await poller_task
+    except asyncio.CancelledError:
+        logger.info("[MAIN] Shutdown complete")
 # CORS
 app.add_middleware(
     CORSMiddleware,

@@ -6,17 +6,18 @@ import enum
 
 from backend.database import Base
 
-
+# in models/ticket.py — add to TicketStatus enum
 class TicketStatus(str, enum.Enum):
-    open        = "open"        # just created
-    ai_pending  = "ai_pending"  # AI is processing
-    auto_solved = "auto_solved" # AI solved it directly with user
-    reviewing   = "reviewing"   # helpdesk member reviewing AI card
-    assigned    = "assigned"    # assigned to an engineer
-    in_progress = "in_progress" # engineer is working on it
-    resolved    = "resolved"    # closed and resolved
-    closed      = "closed"      # closed without resolution
-    reopened    = "reopened"    # user said it wasn't fixed
+    open        = "open"
+    ai_pending  = "ai_pending"
+    auto_solved = "auto_solved"
+    reviewing   = "reviewing"
+    assigned    = "assigned"
+    escalated   = "escalated"   # ← ADD THIS
+    in_progress = "in_progress"
+    resolved    = "resolved"
+    closed      = "closed"
+    reopened    = "reopened"
 
 
 class TicketPriority(str, enum.Enum):
@@ -51,6 +52,7 @@ class Ticket(Base):
     title           = Column(String, nullable=False)
     description     = Column(Text, nullable=False)
     channel         = Column(String, default="web")  # web / email / chat / voice
+    intake_id = Column(String, nullable=True, index=True)
 
     # classification (filled by AI)
     category        = Column(Enum(TicketCategory), nullable=True)

@@ -7,6 +7,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     APP_ENV: str 
 
+    IMAP_HOST:          str
+    IMAP_PORT:          int
+    IMAP_USER:          str
+    IMAP_PASSWORD:      str
+    IMAP_POLL_INTERVAL: int
+    IMAP_MAILBOX:       str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore"

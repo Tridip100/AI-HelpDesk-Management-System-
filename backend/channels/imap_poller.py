@@ -11,6 +11,8 @@ from backend.database import SessionLocal
 from backend.services.ticket_service import create_ticket_from_input
 from backend.channels.email_handler import parse_email
 from backend.channels.normalizer import TicketInput
+from backend.config import settings
+from backend.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +20,18 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────
 # CONFIG  (move to config.py later)
 # ─────────────────────────────────────────
-IMAP_HOST     = "imap.gmail.com"
-IMAP_PORT     = 993                  # SSL port
-IMAP_USER     = "your@gmail.com"     # helpdesk Gmail account
-IMAP_PASSWORD = "your_app_password"  # Gmail App Password (not your real password)
-POLL_INTERVAL = 60                   # seconds between polls
-MAILBOX       = "INBOX"
+
+IMAP_HOST     = settings.IMAP_HOST
+IMAP_PORT     = settings.IMAP_PORT
+IMAP_USER     = settings.IMAP_USER
+IMAP_PASSWORD = settings.IMAP_PASSWORD
+POLL_INTERVAL = settings.IMAP_POLL_INTERVAL
+MAILBOX       = settings.IMAP_MAILBOX
+
+print("IMAP_HOST =", settings.IMAP_HOST)
+print("IMAP_PORT =", settings.IMAP_PORT)
+print("IMAP_USER =", settings.IMAP_USER)
+print("IMAP_PASSWORD length =", len(settings.IMAP_PASSWORD))
 
 
 # ─────────────────────────────────────────
@@ -96,7 +104,7 @@ def resolve_user_id(sender_email: str, db) -> int | None:
     Unknown senders are skipped — we don't create tickets for
     people who aren't registered in the system.
     """
-    from models.user import User
+
     user = db.query(User).filter(User.email == sender_email).first()
     return user.id if user else None
 
