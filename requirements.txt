@@ -19,5 +19,3 @@ transformers
 torch
 vaderSentiment 
 spacy
-test_llm.py 
-test_nlp.py 
