@@ -8,25 +8,33 @@
 # Three tools working together:
 #   VADER   — fast sentiment + urgency scoring (rule-based, no GPU needed)
 #   spaCy   — named entity recognition (error codes, OS, app names)
-#   BERT    — category + priority classification (transformer model)
+#   BERT    — zero-shot classification (only when keywords insufficient)
 #
-# Why this order?
-#   VADER and spaCy are instant (< 50ms)
-#   BERT is slower (200ms) but gives accurate classification
-#   We run VADER + spaCy first to get quick signals,
-#   then BERT only if keyword matching is uncertain
+# Loading strategy:
+#   All models load ONCE on first use (lazy loading)
+#   BERT loads from LOCAL CACHE only — no network calls
+#   HuggingFace offline mode enabled — no warnings
 
+import os
 import re
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
+# ─────────────────────────────────────────
+# SILENCE HUGGINGFACE — load from cache only
+# Must be set BEFORE any transformers import
+# ─────────────────────────────────────────
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["HF_HUB_OFFLINE"]         = "1"    # never call HuggingFace network
+
 logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────
-# KNOWN IT TERMS — spaCy wrongly tags these
-# as PERSON or ORG — we filter them out
+# KNOWN IT TERMS spaCy wrongly tags
+# as PERSON or ORG — filtered out
 # ─────────────────────────────────────────
 SPACY_FILTER_WORDS = {
     "wifi", "vpn", "ransomware", "malware", "phishing",
@@ -40,8 +48,9 @@ SPACY_FILTER_WORDS = {
 
 
 # ─────────────────────────────────────────
-# LAZY LOADING — models load once on first use
-# not at import time — keeps server startup fast
+# LAZY LOADING
+# Models load once on first use — not at import time
+# Keeps server startup fast
 # ─────────────────────────────────────────
 _vader           = None
 _spacy           = None
@@ -69,18 +78,20 @@ def _get_spacy():
 def _get_bert():
     """
     Zero-shot classifier using BERT.
-    Zero-shot means we don't need to train it —
-    we give it candidate labels and it scores each one.
-    No labeled IT helpdesk data needed.
+    Loads from LOCAL CACHE only — never calls HuggingFace network.
+    Cache location: C:\\Users\\tridi\\.cache\\huggingface\\hub\\
+    Only called when keyword matching returns 0 matches.
     """
     global _bert_classifier
     if _bert_classifier is None:
         from transformers import pipeline
         _bert_classifier = pipeline(
             "zero-shot-classification",
-            model="facebook/bart-large-mnli",
+            model            = "facebook/bart-large-mnli",
+            local_files_only = True,    # load from cache only
+            device           = -1,      # CPU — no GPU needed
         )
-        logger.info("[NLP] BERT zero-shot classifier loaded")
+        logger.info("[NLP] BERT loaded from local cache")
     return _bert_classifier
 
 
@@ -91,37 +102,22 @@ def _get_bert():
 class NLPResult:
     """
     Complete structured understanding of a ticket/message.
-    Everything downstream reads from this — triage, RAG, LLM prompt.
+    Everything downstream reads from this.
+    triage() reads tier to decide pipeline path.
+    llm_service reads summary instead of raw text.
+    rag_service reads summary for embedding search.
+    routing_service reads category + priority + severity.
     """
-    # What type of problem
     category:             str
-
-    # How urgent
-    priority:             str             # P1, P2, P3, P4
-
-    # How complex to solve
-    severity:             str             # critical, high, medium, easy
-
-    # Which pipeline path
-    tier:                 str             # tier1, tier2, tier3a, tier3b, tier3c
-
-    # Sentiment analysis (VADER)
-    sentiment_score:      float           # -1 to 1
-    urgency_score:        float           # 0 to 1
-
-    # Named entities (spaCy + regex)
+    priority:             str      # P1, P2, P3, P4
+    severity:             str      # critical, high, medium, easy
+    tier:                 str      # tier1, tier2, tier3a, tier3b, tier3c
+    sentiment_score:      float    # -1 to 1
+    urgency_score:        float    # 0 to 1
     entities:             dict  = field(default_factory=dict)
-
-    # Keywords extracted
     keywords:             list  = field(default_factory=list)
-
-    # Crisp 20-word summary for LLM prompt
     summary:              str   = ""
-
-    # Simple question flag
     is_simple_question:   bool  = False
-
-    # Raw confidence scores
     category_confidence:  float = 0.0
     priority_confidence:  float = 0.0
 
@@ -136,6 +132,9 @@ CATEGORY_KEYWORDS = {
         "webcam", "speaker", "microphone", "hard drive", "ram",
         "cracked", "broken", "damaged", "not turning on", "overheating",
         "touchpad", "trackpad", "docking station", "projector",
+        "unplugging", "replugging", "unplug", "replug",
+        "not working", "stopped working",
+        "device", "hardware", "peripheral", "physical",
     ],
     "network": [
         "vpn", "wifi", "internet", "network", "ethernet", "connection",
@@ -165,7 +164,7 @@ CATEGORY_KEYWORDS = {
     "database": [
         "database", "sql", "query", "connection string", "db error",
         "postgresql", "mysql", "oracle", "mongodb", "backup", "restore",
-        "data corruption", "table", "migration", "deadlock", "timeout",
+        "data corruption", "table", "migration", "deadlock",
     ],
     "cloud_app": [
         "azure", "aws", "gcp", "cloud", "sharepoint", "onedrive",
@@ -212,6 +211,7 @@ SEVERITY_KEYWORDS = {
         "unplugging", "restart", "reboot", "plug",
     ],
 }
+
 PRIORITY_SIGNALS = {
     "P1": [
         "entire office", "all users", "everyone", "whole company",
@@ -223,17 +223,14 @@ PRIORITY_SIGNALS = {
         "team cannot", "department affected", "several users",
         "multiple users", "whole team", "urgent", "asap",
         "immediately", "cannot work at all", "deadline today",
-        "completely blocked", "multiple people",          # ← only strong signals
-        # REMOVED: "error code", "cannot login", "locked out",
-        # "keeps disconnecting", "access denied", "cannot connect"
-        # these are P3 — single user affected
+        "completely blocked", "multiple people",
     ],
     "P3": [
         "my laptop", "my computer", "i cannot", "not working",
         "error", "issue", "problem", "help me", "forgot",
-        "slow", "freezing", "my device", "cannot login",   # ← moved here
-        "locked out", "error code", "access denied",       # ← moved here
-        "keeps disconnecting", "cannot connect",           # ← moved here
+        "slow", "freezing", "my device", "cannot login",
+        "locked out", "error code", "access denied",
+        "keeps disconnecting", "cannot connect",
     ],
     "P4": [
         "when you get a chance", "not urgent", "minor",
@@ -258,31 +255,22 @@ SIMPLE_QUESTION_PATTERNS = [
 def analyze_sentiment(text: str) -> tuple:
     """
     Returns (sentiment_score, urgency_score)
-
-    VADER gives:
-      compound: -1 to 1  (overall sentiment)
-      neg:       0 to 1  (negativity intensity)
-
-    Urgency = combination of negativity + punctuation + caps
+    sentiment: -1 (very negative) to 1 (positive)
+    urgency:    0 (calm) to 1 (very urgent)
     """
-    vader = _get_vader()
-    scores = vader.polarity_scores(text)
-
-    sentiment = round(scores["compound"], 3)
-
+    vader        = _get_vader()
+    scores       = vader.polarity_scores(text)
+    sentiment    = round(scores["compound"], 3)
     urgency_base = scores["neg"]
 
-    # exclamation marks signal urgency
     exclamation_count = text.count("!")
     urgency_base = min(1.0, urgency_base + exclamation_count * 0.1)
 
-    # caps words signal emphasis
     if len(text) > 10:
-        caps_ratio = sum(1 for c in text if c.isupper()) / len(text)
+        caps_ratio   = sum(1 for c in text if c.isupper()) / len(text)
         urgency_base = min(1.0, urgency_base + caps_ratio * 0.3)
 
-    urgency = round(urgency_base, 3)
-    return sentiment, urgency
+    return sentiment, round(urgency_base, 3)
 
 
 # ─────────────────────────────────────────
@@ -291,7 +279,7 @@ def analyze_sentiment(text: str) -> tuple:
 def extract_entities(text: str) -> dict:
     """
     Extract named entities + custom IT patterns.
-    Filters out known IT terms that spaCy mislabels.
+    Filters known IT terms that spaCy mislabels.
     """
     nlp = _get_spacy()
     doc = nlp(text)
@@ -316,7 +304,7 @@ def extract_entities(text: str) -> dict:
     if error_codes:
         entities["error_code"] = list(set(error_codes))
 
-    # IP addresses — stored but sanitizer removes before Tavily
+    # IP addresses — sanitizer removes before Tavily
     ips = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', text)
     if ips:
         entities["ip_address"] = ips
@@ -357,11 +345,22 @@ def extract_keywords(text: str) -> list:
 
 def detect_category_from_keywords(text: str) -> Optional[tuple]:
     """
-    Quick category detection from keyword matching.
-    Returns (category, confidence) or None.
+    Keyword-based category detection.
+
+    Confidence formula — based on number of matches:
+      0 matches → None     → BERT will run
+      1 match   → 0.60     → skip BERT (one specific IT keyword is strong signal)
+      2 matches → 0.80     → skip BERT
+      3+ matches → 0.95    → skip BERT (very confident)
+
+    Why match-count not proportion:
+      Old: confidence = matches/list_length * 10
+           "keyboard" alone → 1/24*10 = 0.41 → borderline → unpredictable
+      New: "keyboard" alone → 0.60 → always skips BERT ✅
     """
     text_lower = text.lower()
     scores = {}
+
     for category, kws in CATEGORY_KEYWORDS.items():
         matches = sum(
             1 for kw in kws
@@ -373,9 +372,19 @@ def detect_category_from_keywords(text: str) -> Optional[tuple]:
     if not scores:
         return None
 
-    best = max(scores, key=scores.get)
-    confidence = min(0.95, scores[best] / len(CATEGORY_KEYWORDS[best]) * 10)
-    return best, round(confidence, 2)
+    best       = max(scores, key=scores.get)
+    best_score = scores[best]
+
+    if best_score >= 3:
+        confidence = 0.95
+    elif best_score == 2:
+        confidence = 0.80
+    elif best_score == 1:
+        confidence = 0.60
+    else:
+        confidence = 0.0
+
+    return best, confidence
 
 
 def detect_severity_from_keywords(text: str) -> str:
@@ -408,23 +417,21 @@ def detect_priority_from_keywords(text: str) -> str:
 
 def is_simple_question(text: str) -> bool:
     """
-    Returns True if message is a simple how-to / where-is question.
-    These go to Tier 1 — LLM only.
-    Guards: not simple if contains error code or urgency words.
+    Returns True if message is a simple how-to question.
+    Guards against error codes and urgency words.
     """
     text_lower = text.lower().strip()
 
-    # Guard — error code present → not simple
+    # Guard — error code present
     if re.search(r'0x[0-9A-Fa-f]+|error\s*\d+', text_lower):
         return False
 
-    # Guard — urgency words → not simple
-
+    # Guard — urgency or damage words
     not_simple_words = [
         "urgent", "asap", "down", "crash", "breach",
         "ransomware", "outage", "emergency", "blocked",
-        "dead", "cracked", "broken", "damaged",        # ← ADD these
-        "completely", "totally", "entirely",            # ← ADD these
+        "dead", "cracked", "broken", "damaged",
+        "completely", "totally", "entirely",
     ]
     if any(w in text_lower for w in not_simple_words):
         return False
@@ -439,17 +446,18 @@ def is_simple_question(text: str) -> bool:
             return True
 
     return False
-    
 
 
 # ─────────────────────────────────────────
-# STEP 4 — BERT ZERO-SHOT CLASSIFICATION
-# Only when keyword confidence < 0.4
+# STEP 4 — BERT ZERO-SHOT
+# Only when keyword matching returns None (0 matches)
+# Loads from local cache — no network
 # ─────────────────────────────────────────
 def classify_with_bert(text: str) -> tuple:
     """
-    BERT zero-shot classification for category.
-    Slower (200ms) — only called when keywords are insufficient.
+    BERT zero-shot classification.
+    Only called when text has NO recognizable IT keywords.
+    Loads facebook/bart-large-mnli from local cache only.
     Returns (category, confidence)
     """
     classifier = _get_bert()
@@ -490,7 +498,7 @@ def classify_with_bert(text: str) -> tuple:
 # STEP 5 — SUMMARY GENERATION
 # ─────────────────────────────────────────
 def generate_summary(
-    text: str,
+    text:     str,
     category: str,
     priority: str,
     severity: str,
@@ -498,15 +506,16 @@ def generate_summary(
 ) -> str:
     """
     Crisp summary for LLM prompt.
-    Format: [P2][MEDIUM] network issue. Error: 0x800704C9. VPN disconnecting on Windows 11
-    No duplication — entity only added if not already in sentence.
+    LLM receives this instead of raw text.
+    No duplication — entity only added if not in first sentence.
+
+    Format:
+    [P2][MEDIUM] network issue. Error: 0x800704C9. VPN disconnecting on Windows 11
     """
-    # First sentence or first 100 chars
     first_sentence = text.split(".")[0].strip()
     if len(first_sentence) > 100:
         first_sentence = text[:100].rsplit(" ", 1)[0] + "..."
 
-    # Entity parts — only if not already in first sentence
     entity_parts = []
     if "error_code" in entities:
         code = entities["error_code"][0]
@@ -518,8 +527,7 @@ def generate_summary(
             entity_parts.append(ver)
 
     entity_str = " | ".join(entity_parts)
-
-    summary = f"[{priority}][{severity.upper()}] {category} issue. "
+    summary    = f"[{priority}][{severity.upper()}] {category} issue. "
     if entity_str:
         summary += f"{entity_str}. "
     summary += first_sentence[:80]
@@ -529,7 +537,7 @@ def generate_summary(
 
 # ─────────────────────────────────────────
 # STEP 6 — TRIAGE DECISION
-# ────────────────────────────────────────
+# ─────────────────────────────────────────
 def decide_tier(
     category: str,
     priority: str,
@@ -537,9 +545,16 @@ def decide_tier(
     keywords: list,
     is_simple: bool
 ) -> str:
+    """
+    Decide which pipeline tier.
 
-    # Tier 3C — P1 ONLY or security category
-    # P2 does NOT automatically mean tier3c
+    tier1  — simple/easy → LLM only, no RAG needed
+    tier2  — technical   → full NLP + RAG + LLM
+    tier3a — simple HW   → LLM tries basic fix first
+    tier3b — complex HW  → helpdesk directly
+    tier3c — P1/security → urgent helpdesk immediately
+    """
+    # Tier 3C — P1 ONLY or security
     if priority == "P1":
         return "tier3c"
     if category == "security":
@@ -557,27 +572,27 @@ def decide_tier(
     if is_simple or severity == "easy":
         return "tier1"
 
-    # Tier 2 — everything else including P2 technical issues
+    # Tier 2 — everything else
     return "tier2"
 
 
 # ─────────────────────────────────────────
 # MAIN — analyze()
+# Call this from ai_pipeline.py
 # ─────────────────────────────────────────
 def analyze(text: str) -> NLPResult:
     """
     Full NLP analysis pipeline.
-    Call this from ai_pipeline.py — runs on every input.
+    Runs on every input before anything else.
 
     Steps:
-    1. VADER  → sentiment + urgency         (instant)
-    2. spaCy  → entity extraction           (instant)
-    3. Keywords → category, severity,       (instant)
+    1. VADER    → sentiment + urgency         (instant)
+    2. spaCy   → entity extraction           (instant)
+    3. Keywords → category, severity,        (instant)
                   priority, simple flag
-    4. BERT   → category only if            (200ms — skipped when not needed)
-                keyword confidence < 0.4
-    5. Summary → crisp 20-word version      (instant)
-    6. Triage  → which tier                 (instant)
+    4. BERT    → only if 0 keyword matches   (from local cache)
+    5. Summary → crisp version for LLM       (instant)
+    6. Triage  → which tier                  (instant)
     """
     logger.info(f"[NLP] Analyzing: {text[:60]}...")
 
@@ -596,13 +611,13 @@ def analyze(text: str) -> NLPResult:
     # Step 3b — category from keywords
     keyword_result = detect_category_from_keywords(text)
 
-    # Step 4 — BERT only if keywords uncertain
+    # Step 4 — BERT only if zero keyword matches
     if keyword_result and keyword_result[1] >= 0.4:
         category       = keyword_result[0]
         cat_confidence = keyword_result[1]
         logger.debug(f"[NLP] Category from keywords: {category} ({cat_confidence})")
     else:
-        logger.debug("[NLP] Keyword confidence low — running BERT")
+        logger.debug("[NLP] No keyword match — running BERT from local cache")
         category, cat_confidence = classify_with_bert(text)
         logger.debug(f"[NLP] Category from BERT: {category} ({cat_confidence})")
 
@@ -618,16 +633,16 @@ def analyze(text: str) -> NLPResult:
     )
 
     return NLPResult(
-        category             = category,
-        priority             = priority,
-        severity             = severity,
-        tier                 = tier,
-        sentiment_score      = sentiment,
-        urgency_score        = urgency,
-        entities             = entities,
-        keywords             = keywords,
-        summary              = summary,
-        is_simple_question   = simple,
-        category_confidence  = cat_confidence,
-        priority_confidence  = 0.9,
+        category            = category,
+        priority            = priority,
+        severity            = severity,
+        tier                = tier,
+        sentiment_score     = sentiment,
+        urgency_score       = urgency,
+        entities            = entities,
+        keywords            = keywords,
+        summary             = summary,
+        is_simple_question  = simple,
+        category_confidence = cat_confidence,
+        priority_confidence = 0.9,
     )

@@ -13,6 +13,7 @@ from backend.routers.intake import router as intake_router
 from backend.channels.imap_poller import start_poller
 from backend.models import user, ticket, ticket_event
 from backend.services.llm_services import check_ollama_health
+from backend.routers.chat import router as chat_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -89,6 +90,7 @@ app.include_router(auth.router)
 app.include_router(tickets.router)
 app.include_router(admin.router)
 app.include_router(intake_router)
+app.include_router(chat_router)
 
 
 @app.get("/")

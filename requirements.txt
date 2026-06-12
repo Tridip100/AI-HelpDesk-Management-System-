@@ -19,3 +19,7 @@ transformers
 torch
 vaderSentiment 
 spacy
+pdfplumber
+chromadb
+pandas
+sentence-transformers

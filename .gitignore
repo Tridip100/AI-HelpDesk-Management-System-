@@ -9,5 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .env
-backend.test_llm.py 
-backend.test_nlp.py 
+backend/ingestion/pdfs 
+backend/ingestion/sops
+
