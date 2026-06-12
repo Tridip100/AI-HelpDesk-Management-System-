@@ -9,6 +9,5 @@ wheels/
 # Virtual environments
 .venv
 .env
-backend/ingestion/data/pdfs 
-backend/ingestion/data/sops
+backend/ingestion/data
 
