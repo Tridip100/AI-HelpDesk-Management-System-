@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import os 
 
 class Settings(BaseSettings):
     DATABASE_URL: str
@@ -13,9 +14,11 @@ class Settings(BaseSettings):
     IMAP_PASSWORD:      str
     IMAP_POLL_INTERVAL: int
     IMAP_MAILBOX:       str
+    TAVILY_API_KEY:     str 
+
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=os.path.join(os.path.dirname(__file__), "..", ".env"),  # ← points to root .env
         extra="ignore"
     )
 
