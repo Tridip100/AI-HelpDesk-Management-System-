@@ -14,7 +14,7 @@ psycopg[binary]
 pg8000
 openai-whisper
 ffmpeg
-bcrypt==3.2.2
+bcrypt==4.0.1
 transformers
 torch
 vaderSentiment 

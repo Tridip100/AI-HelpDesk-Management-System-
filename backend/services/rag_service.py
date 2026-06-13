@@ -17,7 +17,7 @@ import logging
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 
-from ingestion.base_ingestor import search_collection
+from backend.ingestion.base_ingestor import search_collection
 
 logger = logging.getLogger(__name__)
 

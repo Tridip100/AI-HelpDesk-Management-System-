@@ -6,6 +6,7 @@ from email import policy
 import asyncio
 import logging
 from datetime import datetime
+from email.utils import parseaddr
 
 from backend.database import SessionLocal
 from backend.services.ticket_service import create_ticket_from_input
@@ -13,6 +14,10 @@ from backend.channels.email_handler import parse_email
 from backend.channels.normalizer import TicketInput
 from backend.config import settings
 from backend.models.user import User
+from backend.services import ai_pipeline
+from backend.services.ticket_service import create_ticket_from_input
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +127,7 @@ def extract_sender(raw_email: str) -> str:
     from_header = msg.get("from", "")
     # From header can be "Name <email@domain.com>" or just "email@domain.com"
     # email.utils.parseaddr extracts just the address part
-    from email.utils import parseaddr
+    
     _, addr = parseaddr(from_header)
     return addr.lower().strip()
 
@@ -156,7 +161,7 @@ def process_email(raw_email: str, db) -> TicketInput | None:
 # ─────────────────────────────────────────
 # STEP 8 — One full poll cycle
 # ─────────────────────────────────────────
-def poll_once(db) -> int:
+async def poll_once(db) -> int:
     """
     Connect → fetch unread → process each → mark read → disconnect.
     Returns count of tickets created this cycle.
@@ -181,10 +186,27 @@ def poll_once(db) -> int:
                 ticket_input = process_email(raw, db)
 
                 if ticket_input:
-                    # This will call the AI pipeline once it's wired up
-                    # For now just log — we'll replace this with pipeline call
                     logger.info(f"[IMAP] TicketInput ready: {ticket_input.subject}")
-                    # TODO: await ai_pipeline.run(ticket_input, db)
+                    try:
+                        
+                        pipeline_result = await ai_pipeline.run(ticket_input.raw_content)
+                        nlp_result = pipeline_result["nlp"]
+
+                        logger.info(
+                            f"[IMAP] tier={pipeline_result['tier']} "
+                            f"category={nlp_result.category} "
+                            f"confidence={pipeline_result['confidence']}"
+                        )
+
+                        if pipeline_result["should_create_ticket"]:
+                            ticket = create_ticket_from_input(db, ticket_input)
+                            logger.info(f"[IMAP] Ticket created: {ticket.id}")
+                        else:
+                            logger.info(f"[IMAP] AI resolved — response: {pipeline_result['response'][:100]}")
+                            # TODO: SMTP reply to user (future step)
+
+                    except Exception as e:
+                        logger.error(f"[IMAP] Pipeline failed: {e}")
                     processed += 1
 
                 mark_as_read(conn, email_id)
@@ -216,7 +238,7 @@ async def start_poller():
     while True:
         db = SessionLocal()
         try:
-            count = poll_once(db)
+            count = await poll_once(db)
             if count:
                 logger.info(f"[IMAP] Cycle complete — {count} ticket(s) queued")
         finally:

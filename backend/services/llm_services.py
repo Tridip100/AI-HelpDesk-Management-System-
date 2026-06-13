@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "mistral")
-TIMEOUT         = 60        # seconds — Mistral can be slow on CPU
+TIMEOUT         = 120       # seconds — Mistral can be slow on CPU
 MAX_TOKENS      = 1024      # max tokens in LLM response
 CONTEXT_TOKENS  = 3000      # max tokens we send TO LLM (input guard)
 
@@ -178,23 +178,38 @@ def trim_messages(messages: list[dict], max_tokens: int = CONTEXT_TOKENS) -> lis
 # ─────────────────────────────────────────
 def extract_confidence(response_text: str) -> tuple[str, float]:
     """
-    LLM appends "CONFIDENCE: 0.XX" at end of every response.
-    We extract it, remove it from visible response, return separately.
-
-    Returns: (clean_response, confidence_score)
+    LLM appends "CONFIDENCE: 0.XX" at end of response.
+    If missing, estimate confidence using heuristics instead of
+    blindly defaulting to 0.5.
     """
     import re
     pattern = r'CONFIDENCE:\s*(0?\.\d+|1\.0+|0|1)'
     match   = re.search(pattern, response_text, re.IGNORECASE)
 
     if match:
-        confidence   = float(match.group(1))
-        clean_text   = response_text[:match.start()].strip()
+        confidence = float(match.group(1))
+        clean_text = response_text[:match.start()].strip()
         return clean_text, round(confidence, 2)
 
-    # LLM forgot to add confidence — default to 0.5 (uncertain)
-    logger.warning("[LLM] No confidence score in response — defaulting to 0.5")
-    return response_text.strip(), 0.5
+    clean_text = response_text.strip()
+
+    # Low confidence signals
+    uncertainty_phrases = [
+        "not sure", "i'm not sure", "i am not sure", "escalat",
+        "not confident", "don't know", "do not know", "unable to",
+        "i can't", "i cannot"
+    ]
+    if any(p in clean_text.lower() for p in uncertainty_phrases):
+        logger.warning("[LLM] No confidence line, uncertainty language detected — 0.4")
+        return clean_text, 0.4
+
+    # High confidence signal — numbered steps present
+    if re.search(r'^\s*\d+\.', clean_text, re.MULTILINE):
+        logger.warning("[LLM] No confidence line, structured steps present — 0.75")
+        return clean_text, 0.75
+
+    logger.warning("[LLM] No confidence score and no signal — defaulting to 0.55")
+    return clean_text, 0.55
 
 
 # ─────────────────────────────────────────

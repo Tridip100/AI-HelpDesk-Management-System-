@@ -15,8 +15,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from config import Settings
-settings = Settings()
+from backend.config import settings
+
 TAVILY_API_KEY = settings.TAVILY_API_KEY
 MAX_RESULTS    = 5
 

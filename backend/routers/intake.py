@@ -18,6 +18,8 @@ from backend.models.user import User
 from backend.services.stt_service import transcribe_audio
 from backend.channels.channel_router import ingest
 from backend.channels.imap_poller import poll_once
+from backend.services import ai_pipeline
+from backend.services.ticket_service import create_ticket_from_input
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/intake", tags=["intake"])
@@ -96,20 +98,41 @@ async def intake_call(
         f"intake_id={ticket_input.intake_id}, subject={ticket_input.subject}"
     )
 
-    # Step 4: TODO — pass ticket_input to AI pipeline
-    # response = await ai_pipeline.run(ticket_input, db)
-    # For now return the normalized data so we can test in Swagger
+    # replace pipeline_preview import/call with:
 
-    return {
+
+    pipeline_result = await ai_pipeline.run(ticket_input.raw_content)
+    nlp_result = pipeline_result["nlp"]
+
+    response_payload = {
         "status":      "received",
         "intake_id":   ticket_input.intake_id,
         "source":      ticket_input.source,
         "subject":     ticket_input.subject,
         "transcript":  ticket_input.raw_content,
         "confidence":  stt_result["confidence"],
-        "message":     "Call received and transcribed. AI pipeline pending."
+        "language":    stt_result["language"],
+        "language_name": stt_result["language_name"],
+        "duration_seconds": stt_result["duration"],
+        "tier":        pipeline_result["tier"],
+        "nlp": {
+            "category": nlp_result.category,
+            "priority": nlp_result.priority,
+            "severity": nlp_result.severity,
+        },
+        "ai_response":   pipeline_result["response"],
+        "ai_confidence": pipeline_result["confidence"],
     }
 
+    if pipeline_result["should_create_ticket"]:
+        ticket = create_ticket_from_input(db, ticket_input)
+        response_payload["ticket_id"] = ticket.id
+        response_payload["message"] = "Issue escalated — ticket created."
+    else:
+        response_payload["message"] = "AI resolved — no ticket needed."
+
+    return response_payload
+    
 
 # ─────────────────────────────────────────
 # POST /intake/email/poll
@@ -133,7 +156,7 @@ async def trigger_email_poll(
         f"[INTAKE/EMAIL] Manual poll triggered by user_id={current_user.id}"
     )
 
-    count = poll_once(db)
+    count = await poll_once(db)
 
     return {
         "status":          "ok",
