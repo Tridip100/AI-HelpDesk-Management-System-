@@ -144,3 +144,28 @@ def store_resolved_conversation(session_summary: str, category: str, priority: s
     )
 
     logger.info(f"[RAG] Stored resolved chat conversation — {doc_id}")
+
+def store_web_result(query: str, tavily_context: str, category: str):
+    """
+    Store a useful web search result into sop_documents collection.
+    Called after a tier2 response using Tavily gets a good confidence
+    (i.e., it actually helped). Future similar queries find this
+    WITHOUT needing Tavily again — knowledge base "learns" from web search.
+    """
+    from backend.ingestion.base_ingestor import add_to_collection
+    import uuid
+
+    doc_id = f"web_{uuid.uuid4().hex[:8]}"
+
+    add_to_collection(
+        collection_name="sop_documents",
+        ids=[doc_id],
+        texts=[f"{query}\n\n{tavily_context}"],
+        metadatas=[{
+            "source": "web_search",
+            "category": category,
+            "chunk_index": 0,
+            "type": "sop_document",
+        }]
+    )
+    logger.info(f"[RAG] Stored web search result for future use — {doc_id}")

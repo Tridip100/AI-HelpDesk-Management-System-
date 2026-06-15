@@ -29,6 +29,8 @@ OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "mistral")
 TIMEOUT         = 120       # seconds — Mistral can be slow on CPU
 MAX_TOKENS      = 1024      # max tokens in LLM response
 CONTEXT_TOKENS  = 3000      # max tokens we send TO LLM (input guard)
+OLLAMA_MODEL_FAST = "phi3"
+OLLAMA_MODEL_FULL = OLLAMA_MODEL  # keep existing default (mistral) as the "full" model
 
 
 # ─────────────────────────────────────────
@@ -215,25 +217,26 @@ def extract_confidence(response_text: str) -> tuple[str, float]:
 # ─────────────────────────────────────────
 # GENERATE — full response (email + call)
 # ─────────────────────────────────────────
-async def generate(
-    nlp_summary:    str,
-    rag_context:    Optional[str] = None,
-    tavily_context: Optional[str] = None,
-    conversation:   Optional[list] = None,
-    raw_message:    Optional[str] = None,
-) -> dict:
+async def generate(nlp_summary, rag_context=None, tavily_context=None,
+                    conversation=None, raw_message=None, model: str = None) -> dict:
     """
     Generate a complete response from Ollama.
     Used for: email replies, call replies, non-streaming chat.
+
+    Args:
+        model: "phi3" for fast/draft responses, "mistral" (default) for
+               final refined tier2 answers. Pass explicitly from ai_pipeline.
 
     Returns:
     {
         "response":   "1. Go to Settings...",
         "confidence": 0.87,
-        "model":      "mistral",
+        "model":      "phi3" | "mistral",
         "tokens":     245
     }
     """
+    selected_model = model or OLLAMA_MODEL_FULL
+
     messages = build_prompt(
         nlp_summary, rag_context, tavily_context,
         conversation, raw_message
@@ -241,14 +244,14 @@ async def generate(
     messages = trim_messages(messages)
 
     token_estimate = estimate_tokens(messages)
-    logger.info(f"[LLM] Generating — ~{token_estimate} input tokens")
+    logger.info(f"[LLM] Generating with {selected_model} — ~{token_estimate} input tokens")
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             response = await client.post(
                 f"{OLLAMA_BASE_URL}/api/chat",
                 json={
-                    "model":    OLLAMA_MODEL,
+                    "model":    selected_model,
                     "messages": messages,
                     "stream":   False,          # full response at once
                     "options": {
@@ -273,12 +276,12 @@ async def generate(
     raw_text   = data["message"]["content"]
     clean_text, confidence = extract_confidence(raw_text)
 
-    logger.info(f"[LLM] Done — confidence={confidence}")
+    logger.info(f"[LLM] Done — model={selected_model} confidence={confidence}")
 
     return {
         "response":   clean_text,
         "confidence": confidence,
-        "model":      OLLAMA_MODEL,
+        "model":      selected_model,
         "tokens":     data.get("eval_count", 0),
     }
 

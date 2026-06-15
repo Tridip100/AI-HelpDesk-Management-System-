@@ -10,6 +10,8 @@ from backend.models.user import User, UserRole
 from backend.middleware.rbac import current_user_admin
 from backend.models.ticket import Ticket, TicketStatus
 from backend.models.ticket_event import TicketEvent
+from datetime import datetime, timedelta
+from backend.middleware.rbac import current_user_admin, current_user_helpdesk_or_above
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -156,3 +158,133 @@ def team_metrics(
             "avg_csat": round(float(e.avg_csat), 2) if e.avg_csat else None
         } for e in engineer_stats]
     }
+
+
+@router.get("/stats/daily")
+def stats_daily(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_admin)
+):
+    """Ticket counts per day for the last N days."""
+    since = datetime.utcnow() - timedelta(days=days)
+    rows = (
+        db.query(
+            func.date(Ticket.created_at).label("day"),
+            func.count(Ticket.id).label("count"),
+        )
+        .filter(Ticket.created_at >= since)
+        .group_by(func.date(Ticket.created_at))
+        .order_by(func.date(Ticket.created_at))
+        .all()
+    )
+    return [{"date": str(r.day), "count": r.count} for r in rows]
+
+
+@router.get("/stats/weekly")
+def stats_weekly(
+    weeks: int = 12,
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_admin)
+):
+    """Ticket counts per week for the last N weeks."""
+    since = datetime.utcnow() - timedelta(weeks=weeks)
+    rows = (
+        db.query(
+            func.date_trunc("week", Ticket.created_at).label("week"),
+            func.count(Ticket.id).label("count"),
+        )
+        .filter(Ticket.created_at >= since)
+        .group_by(func.date_trunc("week", Ticket.created_at))
+        .order_by(func.date_trunc("week", Ticket.created_at))
+        .all()
+    )
+    return [{"week": str(r.week.date()), "count": r.count} for r in rows]
+
+
+@router.get("/stats/monthly")
+def stats_monthly(
+    months: int = 12,
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_admin)
+):
+    """Ticket counts per month for the last N months."""
+    since = datetime.utcnow() - timedelta(days=months * 31)
+    rows = (
+        db.query(
+            func.date_trunc("month", Ticket.created_at).label("month"),
+            func.count(Ticket.id).label("count"),
+        )
+        .filter(Ticket.created_at >= since)
+        .group_by(func.date_trunc("month", Ticket.created_at))
+        .order_by(func.date_trunc("month", Ticket.created_at))
+        .all()
+    )
+    return [{"month": str(r.month.date())[:7], "count": r.count} for r in rows]
+
+
+@router.get("/stats/summary")
+def stats_summary(
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_admin)
+):
+    """Quick top-line numbers for admin dashboard."""
+    total = db.query(func.count(Ticket.id)).scalar()
+
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_count = db.query(func.count(Ticket.id)).filter(Ticket.created_at >= today_start).scalar()
+
+    week_start = datetime.utcnow() - timedelta(days=7)
+    week_count = db.query(func.count(Ticket.id)).filter(Ticket.created_at >= week_start).scalar()
+
+    month_start = datetime.utcnow() - timedelta(days=30)
+    month_count = db.query(func.count(Ticket.id)).filter(Ticket.created_at >= month_start).scalar()
+
+    return {
+        "total": total,
+        "today": today_count,
+        "this_week": week_count,
+        "this_month": month_count,
+    }
+
+@router.get("/engineers", response_model=List[UserOut])
+def list_engineers(
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_helpdesk_or_above)
+):
+    """Helpdesk+: list all engineers for ticket assignment."""
+    return db.query(User).filter(User.role == UserRole.engineer, User.is_active == True).all()
+
+
+@router.get("/knowledge-gaps")
+def knowledge_gaps(
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_admin)
+):
+    """
+    Admin: categories where AI confidence is consistently low.
+    Signals where the knowledge base needs more SOPs/documents.
+    """
+    from backend.services.knowledge_gap_service import get_gap_summary
+    return get_gap_summary(db)
+
+@router.get("/incidents")
+def list_incidents(
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_admin)
+):
+    """Admin: view all incidents (clustered duplicate tickets) and their children."""
+    incidents = db.query(Ticket).filter(Ticket.is_incident == True).order_by(Ticket.created_at.desc()).all()
+
+    return [{
+        "id": i.id,
+        "title": i.title,
+        "category": i.category.value if i.category else None,
+        "priority": i.priority.value,
+        "status": i.status.value,
+        "created_at": i.created_at.isoformat(),
+        "children": [
+            {"id": c.id, "title": c.title, "created_at": c.created_at.isoformat()}
+            for c in db.query(Ticket).filter(Ticket.parent_ticket_id == i.id).all()
+        ],
+    } for i in incidents]

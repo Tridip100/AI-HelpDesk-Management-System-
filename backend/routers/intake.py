@@ -20,6 +20,8 @@ from backend.channels.channel_router import ingest
 from backend.channels.imap_poller import poll_once
 from backend.services import ai_pipeline
 from backend.services.ticket_service import create_ticket_from_input
+from backend.services import nlp_services as nlp_service
+from backend.services.knowledge_gap_service import log_gap 
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/intake", tags=["intake"])
@@ -30,26 +32,11 @@ router = APIRouter(prefix="/intake", tags=["intake"])
 # ─────────────────────────────────────────
 @router.post("/call")
 async def intake_call(
-    audio: UploadFile = File(...),           # audio file from frontend
+    audio: UploadFile = File(...),
+    dry_run: bool = False,           # NEW — if True, skip ticket creation (used by chat voice mode)
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Receive a call audio file from the frontend.
-
-    Flow:
-      1. Read audio bytes from upload
-      2. stt_service transcribes audio → text
-      3. Build call payload
-      4. channel_router.ingest() → TicketInput
-      5. Return TicketInput details (AI pipeline wired here later)
-
-    Why is audio an UploadFile?
-    FastAPI's UploadFile handles multipart/form-data uploads.
-    The frontend sends the audio as a form field named "audio".
-    """
-
-    # Validate file type — only accept audio
     allowed_types = [
         "audio/wav", "audio/mpeg", "audio/mp4",
         "audio/webm", "audio/ogg", "audio/x-wav"
@@ -60,7 +47,6 @@ async def intake_call(
             detail=f"Invalid file type: {audio.content_type}. Must be audio."
         )
 
-    # Read bytes from upload
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file")
@@ -70,7 +56,6 @@ async def intake_call(
         f"({len(audio_bytes)} bytes) from user_id={current_user.id}"
     )
 
-    # Step 1: Transcribe audio → text
     stt_result = transcribe_audio(audio_bytes, audio.filename)
 
     logger.info(
@@ -78,7 +63,6 @@ async def intake_call(
         f"duration={stt_result['duration']}s"
     )
 
-    # Step 2: Build the payload call_handler expects
     call_payload = {
         "call_id":               f"call_{current_user.id}_{audio.filename}",
         "transcript":            stt_result["transcript"],
@@ -86,7 +70,6 @@ async def intake_call(
         "transcript_confidence": stt_result["confidence"],
     }
 
-    # Step 3: channel_router normalizes → TicketInput
     ticket_input = ingest(
         source   = "call",
         payload  = call_payload,
@@ -98,12 +81,6 @@ async def intake_call(
         f"intake_id={ticket_input.intake_id}, subject={ticket_input.subject}"
     )
 
-    # replace pipeline_preview import/call with:
-
-
-    pipeline_result = await ai_pipeline.run(ticket_input.raw_content)
-    nlp_result = pipeline_result["nlp"]
-
     response_payload = {
         "status":      "received",
         "intake_id":   ticket_input.intake_id,
@@ -114,17 +91,29 @@ async def intake_call(
         "language":    stt_result["language"],
         "language_name": stt_result["language_name"],
         "duration_seconds": stt_result["duration"],
-        "tier":        pipeline_result["tier"],
-        "nlp": {
-            "category": nlp_result.category,
-            "priority": nlp_result.priority,
-            "severity": nlp_result.severity,
-        },
-        "ai_response":   pipeline_result["response"],
-        "ai_confidence": pipeline_result["confidence"],
     }
 
+    # dry_run = True: just return the transcript, skip AI pipeline + ticket creation.
+    # Used when ChatView records voice and re-sends the transcript through
+    # /chat/message — avoids running the pipeline twice and creating duplicate tickets.
+    if dry_run:
+        response_payload["message"] = "Transcribed — pass to chat for full response."
+        return response_payload
+
+    pipeline_result = await ai_pipeline.run(ticket_input.raw_content)
+    nlp_result = pipeline_result["nlp"]
+
+    response_payload["tier"] = pipeline_result["tier"]
+    response_payload["nlp"] = {
+        "category": nlp_result.category,
+        "priority": nlp_result.priority,
+        "severity": nlp_result.severity,
+    }
+    response_payload["ai_response"]   = pipeline_result["response"]
+    response_payload["ai_confidence"] = pipeline_result["confidence"]
+
     if pipeline_result["should_create_ticket"]:
+        log_gap(db, nlp_result, pipeline_result, source="call")
         ticket = create_ticket_from_input(db, ticket_input)
         response_payload["ticket_id"] = ticket.id
         response_payload["message"] = "Issue escalated — ticket created."
@@ -132,7 +121,6 @@ async def intake_call(
         response_payload["message"] = "AI resolved — no ticket needed."
 
     return response_payload
-    
 
 # ─────────────────────────────────────────
 # POST /intake/email/poll

@@ -188,25 +188,30 @@ async def poll_once(db) -> int:
                 if ticket_input:
                     logger.info(f"[IMAP] TicketInput ready: {ticket_input.subject}")
                     try:
-                        
-                        pipeline_result = await ai_pipeline.run(ticket_input.raw_content)
-                        nlp_result = pipeline_result["nlp"]
+                        from backend.services import nlp_services as nlp_service
+                        from backend.services.ticket_service import create_ticket_from_input, apply_ai_classification
+                        from backend.models.ticket import TicketCategory, TicketPriority, ResolutionPath
 
-                        logger.info(
-                            f"[IMAP] tier={pipeline_result['tier']} "
-                            f"category={nlp_result.category} "
-                            f"confidence={pipeline_result['confidence']}"
+                        nlp_result = nlp_service.analyze(ticket_input.raw_content)
+
+                        ticket = create_ticket_from_input(db, ticket_input)
+
+                        ticket = apply_ai_classification(
+                            db, ticket,
+                            category=TicketCategory(nlp_result.category) if nlp_result.category in TicketCategory._value2member_map_ else TicketCategory.other,
+                            priority=TicketPriority(nlp_result.priority),
+                            sentiment_score=nlp_result.sentiment_score,
+                            ai_confidence=nlp_result.category_confidence,
+                            ai_suggestion=nlp_result.summary,
+                            ai_draft_reply="",
+                            similar_ids=[],
+                            resolution_path=ResolutionPath.helpdesk,
                         )
 
-                        if pipeline_result["should_create_ticket"]:
-                            ticket = create_ticket_from_input(db, ticket_input)
-                            logger.info(f"[IMAP] Ticket created: {ticket.id}")
-                        else:
-                            logger.info(f"[IMAP] AI resolved — response: {pipeline_result['response'][:100]}")
-                            # TODO: SMTP reply to user (future step)
+                        logger.info(f"[IMAP] Ticket created — {ticket.id} category={nlp_result.category} priority={nlp_result.priority}")
 
                     except Exception as e:
-                        logger.error(f"[IMAP] Pipeline failed: {e}")
+                        logger.error(f"[IMAP] Failed to process email ticket: {e}")
                     processed += 1
 
                 mark_as_read(conn, email_id)

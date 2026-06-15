@@ -9,7 +9,8 @@ from backend.models.ticket import Ticket, TicketStatus, TicketPriority, TicketCa
 from backend.models.ticket_event import TicketEvent, EventAction
 from backend.models.user import User, UserRole
 from backend.channels.normalizer import TicketInput   # ← ADD THIS
-
+from datetime import datetime, timedelta
+from backend.models.ticket import TicketPriority
 
 # SLA deadlines per priority
 SLA_HOURS = {
@@ -18,6 +19,10 @@ SLA_HOURS = {
     TicketPriority.P3: 8,
     TicketPriority.P4: 24,
 }
+
+def calculate_sla_deadline(priority: TicketPriority) -> datetime:
+    hours = SLA_HOURS.get(priority, 24)
+    return datetime.utcnow() + timedelta(hours=hours)
 
 
 def log_event(

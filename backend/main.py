@@ -11,9 +11,11 @@ from backend.database import engine, Base
 from backend.routers import auth, tickets, admin
 from backend.routers.intake import router as intake_router
 from backend.channels.imap_poller import start_poller
-from backend.models import user, ticket, ticket_event
+from backend.models import user, ticket, ticket_event, knowledge_gap
 from backend.services.llm_services import check_ollama_health
 from backend.routers.chat import router as chat_router
+from backend.services.sla_service import start_sla_checker
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,18 +31,31 @@ Base.metadata.create_all(bind=engine)
 async def lifespan(app: FastAPI):
     # STARTUP
     logger.info("[MAIN] Starting AI Helpdesk backend...")
+
+    ollama_ok = await check_ollama_health()
+    if not ollama_ok:
+        logger.warning("[MAIN] Ollama not ready — LLM features disabled")
+
     poller_task = asyncio.create_task(start_poller())
     logger.info("[MAIN] IMAP poller started")
+
+    sla_task = asyncio.create_task(start_sla_checker())
+    logger.info("[MAIN] SLA checker started")
 
     yield  # app runs here
 
     # SHUTDOWN
     logger.info("[MAIN] Shutting down...")
     poller_task.cancel()
+    sla_task.cancel()
     try:
         await poller_task
     except asyncio.CancelledError:
         logger.info("[MAIN] IMAP poller stopped cleanly")
+    try:
+        await sla_task
+    except asyncio.CancelledError:
+        logger.info("[MAIN] SLA checker stopped cleanly")
 
 
 # ─────────────────────────────────────────
@@ -49,33 +64,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Helpdesk Copilot",
     description="Multi-role IT helpdesk system with AI-assisted ticket resolution",
-    version="0.1.0",          # ← comma was missing here
-    lifespan=lifespan          # ← now defined above
+    version="0.1.0",
+    lifespan=lifespan
 )
-# in backend/main.py — update lifespan
 
-from backend.services.llm_services import check_ollama_health
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("[MAIN] Starting AI Helpdesk backend...")
-
-    # Check Ollama
-    ollama_ok = await check_ollama_health()
-    if not ollama_ok:
-        logger.warning("[MAIN] Ollama not ready — LLM features disabled")
-
-    # Start IMAP poller
-    poller_task = asyncio.create_task(start_poller())
-    logger.info("[MAIN] IMAP poller started")
-
-    yield
-
-    poller_task.cancel()
-    try:
-        await poller_task
-    except asyncio.CancelledError:
-        logger.info("[MAIN] Shutdown complete")
 # CORS
 app.add_middleware(
     CORSMiddleware,
