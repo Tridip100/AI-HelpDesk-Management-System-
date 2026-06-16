@@ -161,7 +161,15 @@ async def chat_message_with_image(
     description = await describe_image(image_bytes)
     logger.info(f"[CHAT] Vision description: {description[:150]}")
 
-    combined_text = f"{message.strip()}\n\n[Screenshot shows: {description}]" if message.strip() else f"[Screenshot shows: {description}]"
+
+
+# WITH:
+    user_msg = message.strip() or "Please help me with this issue shown in the screenshot."
+    combined_text = (
+        f"User uploaded a screenshot showing the following text/content:\n"
+        f"{description}\n\n"
+        f"User's message: {user_msg}"
+    )
 
     chat_service.add_user_message(session_id, combined_text)
 

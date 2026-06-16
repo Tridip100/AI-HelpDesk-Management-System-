@@ -288,3 +288,18 @@ def list_incidents(
             for c in db.query(Ticket).filter(Ticket.parent_ticket_id == i.id).all()
         ],
     } for i in incidents]
+
+
+@router.get("/digest")
+async def shift_digest(
+    hours: int = 8,
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_helpdesk_or_above),
+):
+    """
+    Generate a shift handover digest for the last N hours.
+    Accessible by helpdesk and admin.
+    hours param: 4, 8, 12, or 24 depending on shift length.
+    """
+    from backend.services.digest_service import generate_digest
+    return await generate_digest(db, hours)

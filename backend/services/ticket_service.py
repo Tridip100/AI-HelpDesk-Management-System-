@@ -9,12 +9,12 @@ from backend.models.ticket import Ticket, TicketStatus, TicketPriority, TicketCa
 from backend.models.ticket_event import TicketEvent, EventAction
 from backend.models.user import User, UserRole
 from backend.channels.normalizer import TicketInput   # ← ADD THIS
-from datetime import datetime, timedelta
-from backend.models.ticket import TicketPriority
+from backend.services.anomaly_services import check_for_incident
+
 
 # SLA deadlines per priority
 SLA_HOURS = {
-    TicketPriority.P1: 1,
+    TicketPriority.P1: 2,
     TicketPriority.P2: 4,
     TicketPriority.P3: 8,
     TicketPriority.P4: 24,
@@ -193,6 +193,8 @@ def apply_ai_classification(
 
     db.commit()
     db.refresh(ticket)
+    check_for_incident(db, ticket)
+
     return ticket
 
 

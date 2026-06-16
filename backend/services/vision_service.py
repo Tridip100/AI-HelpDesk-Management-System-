@@ -13,11 +13,13 @@ VISION_MODEL = "llava"
 TIMEOUT = 120
 
 VISION_PROMPT = (
-    "This is a screenshot from a user reporting an IT support issue. "
-    "Describe what is shown: any error messages, dialog boxes, error codes, "
-    "application names, or warning text visible. Quote any error text or "
-    "error codes EXACTLY as shown. Be concise and factual. "
-    "If nothing seems wrong, briefly describe what application/screen is shown."
+    "You are analyzing a screenshot for IT support. "
+    "Your ONLY job is to extract and quote the exact visible text. "
+    "Focus on: error message text, error codes (e.g. 0x..., Error XXXX), "
+    "dialog box titles, application names, warning text. "
+    "Quote ALL visible text EXACTLY as it appears. "
+    "Do not describe the image style or layout. "
+    "Format: list each piece of text on a new line, quoted exactly."
 )
 
 
@@ -53,13 +55,13 @@ async def describe_image(image_bytes: bytes) -> str:
                         }
                     ],
                     "stream": False,
-                    "options": {"temperature": 0.2, "num_predict": 250},
+                    "options": {"temperature": 0.2, "num_predict": 400},
                 },
             )
             response.raise_for_status()
             data = response.json()
 
-        description = data["message"]["content"].strip()
+        description = description.replace("```", "").strip()
         logger.info(f"[VISION] Described image — {len(description)} chars")
         return description
 
