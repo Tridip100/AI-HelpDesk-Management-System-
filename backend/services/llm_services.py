@@ -34,10 +34,7 @@ OLLAMA_MODEL_FULL = OLLAMA_MODEL  # keep existing default (mistral) as the "full
 
 
 # ─────────────────────────────────────────
-# SYSTEM PROMPT
-# This is the most important part of hallucination prevention.
-# LLM ONLY answers IT helpdesk questions.
-# If it doesn't know → it says so, never invents.
+# SYSTEM PROMPTS
 # ─────────────────────────────────────────
 SYSTEM_PROMPT = """You are an expert IT helpdesk assistant.
 
@@ -68,6 +65,30 @@ At the END of every response add exactly this line:
 CONFIDENCE: 0.XX
 Where 0.XX is your confidence that your answer fully resolves the issue.
 0.90+ = very confident | 0.70-0.89 = fairly confident | below 0.70 = not sure"""
+
+
+ENGINEER_SYSTEM_PROMPT = """You are an expert AI assistant helping a trained IT engineer debug and resolve a support ticket.
+
+RULES:
+1. The person talking to you is a skilled IT engineer — answer ALL their questions fully and technically
+2. You can discuss ANYTHING relevant: root cause analysis, CLI commands, config changes,
+   log interpretation, network diagnostics, registry edits, server configs, code fixes,
+   database queries, scripting, architecture decisions — nothing is off limits
+3. NEVER say "I can only help with IT issues" — engineers ask legitimate deep technical questions
+4. If asked to summarize the ticket — give a clear concise summary of the problem and context
+5. If asked "what's next" or "next steps" — suggest the most logical diagnostic or resolution step
+6. Give specific commands, exact syntax, and expected outputs where possible
+7. Be direct and technical — the engineer doesn't need hand-holding
+
+RESPONSE FORMAT:
+- Summaries: 2-3 clear sentences
+- Next steps: numbered list of specific actions
+- Commands: include exact syntax in code format
+- Analysis: direct and factual
+
+CONFIDENCE SCORE:
+At the END of every response add exactly this line:
+CONFIDENCE: 0.XX"""
 # ─────────────────────────────────────────
 # PROMPT BUILDER
 # Assembles the full prompt from NLP summary + RAG context + history
@@ -79,6 +100,7 @@ def build_prompt(
     tavily_context: Optional[str] = None,
     conversation:   Optional[list] = None,
     raw_message:    Optional[str] = None,
+    system_prompt:  Optional[str] = None,
 ) -> list[dict]:
     """
     Build the messages list for Ollama API.
@@ -106,7 +128,7 @@ def build_prompt(
     # System prompt — always first
     messages.append({
         "role":    "system",
-        "content": SYSTEM_PROMPT
+        "content": system_prompt or SYSTEM_PROMPT 
     })
 
     # Context block — RAG + Tavily results if available
@@ -224,7 +246,9 @@ def extract_confidence(response_text: str) -> tuple[str, float]:
 # GENERATE — full response (email + call)
 # ─────────────────────────────────────────
 async def generate(nlp_summary, rag_context=None, tavily_context=None,
-                    conversation=None, raw_message=None, model: str = None) -> dict:
+                    conversation=None, raw_message=None, model: str = None,engineer_mode:bool = False,) -> dict:
+    selected_model  = model or OLLAMA_MODEL_FULL
+    active_prompt   = ENGINEER_SYSTEM_PROMPT if engineer_mode else SYSTEM_PROMPT
     """
     Generate a complete response from Ollama.
     Used for: email replies, call replies, non-streaming chat.
@@ -245,7 +269,8 @@ async def generate(nlp_summary, rag_context=None, tavily_context=None,
 
     messages = build_prompt(
         nlp_summary, rag_context, tavily_context,
-        conversation, raw_message
+        conversation, raw_message,
+        system_prompt=active_prompt,
     )
     messages = trim_messages(messages)
 
@@ -301,6 +326,7 @@ async def generate_stream(
     tavily_context: Optional[str] = None,
     conversation:   Optional[list] = None,
     raw_message:    Optional[str] = None,
+    engineer_mode:  bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     Stream response token by token.
@@ -314,9 +340,12 @@ async def generate_stream(
     Without streaming: user waits 5-8 seconds staring at blank screen.
     With streaming: first word appears in ~1 second, feels responsive.
     """
+    active_prompt = ENGINEER_SYSTEM_PROMPT if engineer_mode else SYSTEM_PROMPT
+
     messages = build_prompt(
         nlp_summary, rag_context, tavily_context,
-        conversation, raw_message
+        conversation, raw_message,
+        system_prompt=active_prompt,
     )
     messages = trim_messages(messages)
 
@@ -332,7 +361,7 @@ async def generate_stream(
                 json={
                     "model":    OLLAMA_MODEL,
                     "messages": messages,
-                    "stream":   True,           # token by token
+                    "stream":   True,
                     "options": {
                         "num_predict": MAX_TOKENS,
                         "temperature": 0.3,
@@ -345,20 +374,16 @@ async def generate_stream(
                 async for line in response.aiter_lines():
                     if not line.strip():
                         continue
-
                     try:
                         chunk = json.loads(line)
                     except json.JSONDecodeError:
                         continue
 
                     token = chunk.get("message", {}).get("content", "")
-
                     if token:
                         full_response += token
-                        # yield each token to the frontend
                         yield token
 
-                    # done signal from Ollama
                     if chunk.get("done", False):
                         break
 
@@ -367,12 +392,8 @@ async def generate_stream(
         yield "[ERROR] AI service unavailable. Please try again."
         return
 
-    # Extract confidence from full assembled response
     _, confidence = extract_confidence(full_response)
     logger.info(f"[LLM] Stream done — confidence={confidence}")
-
-    # Send confidence as final structured message
-    # Frontend reads this to decide: show more options or escalate
     yield json.dumps({"type": "confidence", "value": confidence})
 
 

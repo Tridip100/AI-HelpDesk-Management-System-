@@ -5,7 +5,7 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Form, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -20,7 +20,6 @@ from backend.services.ticket_service import create_ticket_from_input
 from backend.channels.channel_router import ingest
 from backend.services.knowledge_gap_service import log_gap
 from backend.services.anomaly_services import check_for_incident
-from fastapi import Form, UploadFile, File
 from backend.services.vision_service import describe_image
 
 logger = logging.getLogger(__name__)
@@ -28,8 +27,10 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 class ChatMessageRequest(BaseModel):
-    message:    str
-    session_id: Optional[str] = None
+    message:        str
+    session_id:     Optional[str] = None
+    engineer_mode:  bool = False
+    ticket_context: Optional[str] = None
 
 
 class EscalateRequest(BaseModel):
@@ -47,10 +48,6 @@ async def chat_message(
     current_user: User = Depends(get_current_user),
     db:           Session = Depends(get_db)
 ):
-    """
-    Main chatbot endpoint.
-    Streams: status events (progress) -> nlp metadata -> response tokens -> final event.
-    """
     session_id = request.session_id or str(uuid.uuid4())
     session    = chat_service.get_or_create_session(session_id, current_user.id, "chat")
 
@@ -61,7 +58,7 @@ async def chat_message(
 
     chat_service.add_user_message(session_id, request.message)
 
-    logger.info(f"[CHAT] Message from user={current_user.id} session={session_id} turn={session.turn_count}")
+    logger.info(f"[CHAT] Message from user={current_user.id} session={session_id} turn={session.turn_count} engineer_mode={request.engineer_mode}")
 
     recent_turns, summary = await chat_service.build_context_for_llm(session)
     conversation = []
@@ -69,16 +66,59 @@ async def chat_message(
         conversation.append({"role": "system", "content": f"Previous conversation summary: {summary}"})
     conversation.extend(recent_turns)
 
+    # ─────────────────────────────────────────
+    # Engineer mode — bypass normal AI pipeline,
+    # send directly to LLM with engineer system prompt
+    # Engineers are internal staff — they can ask anything
+    # ─────────────────────────────────────────
+    if request.engineer_mode:
+        from backend.services import llm_services as llm_service
+
+        async def engineer_stream():
+            # Build engineer-specific message with ticket context
+            if request.ticket_context:
+                engineer_message = (
+                    f"Ticket context:\n{request.ticket_context}\n\n"
+                    f"Engineer's question: {request.message}"
+                )
+            else:
+                engineer_message = request.message
+
+            full_response = ""
+
+            async for token in llm_service.generate_stream(
+                nlp_summary  = engineer_message,
+                conversation = conversation,
+                raw_message  = engineer_message,
+                engineer_mode = True,
+            ):
+                if token.startswith('{"type"'):
+                    # confidence signal — send as-is
+                    yield f"data: {token}\n\n"
+                    continue
+                full_response += token
+                yield f"data: {token} \n\n"
+
+            chat_service.add_ai_response(session_id, full_response, 0.9)
+
+            # Engineer chats don't create tickets or escalate
+            yield f"data: {json.dumps({'type': 'confidence', 'value': 0.9, 'session_id': session_id})}\n\n"
+
+        return StreamingResponse(engineer_stream(), media_type="text/event-stream")
+
+    # ─────────────────────────────────────────
+    # Normal user pipeline
+    # ─────────────────────────────────────────
     async def response_stream():
         pipeline_result = None
-        response_text = ""
+        response_text   = ""
 
         async for event in ai_pipeline.run_streaming(request.message, conversation=conversation):
             if event["type"] == "status":
                 yield f"data: {json.dumps(event)}\n\n"
             elif event["type"] == "result":
                 pipeline_result = event
-                response_text = event["response"] or ""
+                response_text   = event["response"] or ""
             elif event["type"] == "draft":
                 yield f"data: {json.dumps(event)}\n\n"
 
@@ -126,26 +166,17 @@ async def chat_message(
 
     return StreamingResponse(response_stream(), media_type="text/event-stream")
 
-from fastapi import UploadFile, File
-from backend.services.vision_service import describe_image
-
 
 @router.post("/message-with-image")
 async def chat_message_with_image(
-    message: str = Form(""),
-    session_id: str = Form(None),
-    image: UploadFile = File(...),
+    message:      str = Form(""),
+    session_id:   str = Form(None),
+    image:        UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db:           Session = Depends(get_db),
 ):
-    """
-    Like /chat/message, but accepts an image (screenshot).
-    The image is described by a vision model, and that description
-    is combined with the user's text message before running the
-    normal AI pipeline.
-    """
     session_id = session_id or str(uuid.uuid4())
-    session = chat_service.get_or_create_session(session_id, current_user.id, "chat")
+    session    = chat_service.get_or_create_session(session_id, current_user.id, "chat")
 
     if session.resolved:
         raise HTTPException(status_code=400, detail="This conversation is already resolved. Start a new one.")
@@ -159,12 +190,11 @@ async def chat_message_with_image(
     logger.info(f"[CHAT] Image received from user={current_user.id} session={session_id} ({len(image_bytes)} bytes)")
 
     description = await describe_image(image_bytes)
+    # Strip backtick fences from vision model output
+    description = description.replace("```", "").strip()
     logger.info(f"[CHAT] Vision description: {description[:150]}")
 
-
-
-# WITH:
-    user_msg = message.strip() or "Please help me with this issue shown in the screenshot."
+    user_msg      = message.strip() or "Please help me with this issue shown in the screenshot."
     combined_text = (
         f"User uploaded a screenshot showing the following text/content:\n"
         f"{description}\n\n"
@@ -180,11 +210,10 @@ async def chat_message_with_image(
     conversation.extend(recent_turns)
 
     async def response_stream():
-        # Send vision description first so user sees what AI "saw"
         yield f"data: {json.dumps({'type': 'vision', 'description': description})}\n\n"
 
         pipeline_result = None
-        response_text = ""
+        response_text   = ""
 
         async for event in ai_pipeline.run_streaming(combined_text, conversation=conversation):
             if event["type"] == "status":
@@ -193,17 +222,17 @@ async def chat_message_with_image(
                 yield f"data: {json.dumps(event)}\n\n"
             elif event["type"] == "result":
                 pipeline_result = event
-                response_text = event["response"] or ""
+                response_text   = event["response"] or ""
 
         nlp_result = pipeline_result["nlp"]
         confidence = pipeline_result["confidence"]
 
         nlp_meta = {
-            "type": "nlp",
-            "tier": pipeline_result["tier"],
-            "category": nlp_result.category if nlp_result else "follow_up",
-            "priority": nlp_result.priority if nlp_result else "P3",
-            "severity": nlp_result.severity if nlp_result else "easy",
+            "type":       "nlp",
+            "tier":       pipeline_result["tier"],
+            "category":   nlp_result.category if nlp_result else "follow_up",
+            "priority":   nlp_result.priority if nlp_result else "P3",
+            "severity":   nlp_result.severity if nlp_result else "easy",
             "session_id": session_id,
         }
         yield f"data: {json.dumps(nlp_meta)}\n\n"
@@ -214,9 +243,7 @@ async def chat_message_with_image(
         chat_service.add_ai_response(session_id, response_text, confidence)
 
         if pipeline_result["should_create_ticket"]:
-            from backend.services.knowledge_gap_service import log_gap
             log_gap(db, nlp_result, pipeline_result, source="chat")
-
             effective_nlp = nlp_result or nlp_service.analyze(session.to_ticket_content()[:500])
             ticket = await _create_ticket_from_session(session, effective_nlp, db, current_user)
             session.escalated = True
@@ -248,7 +275,7 @@ async def chat_escalate(
         raise HTTPException(status_code=400, detail="Already escalated")
 
     conversation_text = session.to_ticket_content()
-    nlp_result = nlp_service.analyze(conversation_text[:500])
+    nlp_result        = nlp_service.analyze(conversation_text[:500])
 
     ticket = await _create_ticket_from_session(session, nlp_result, db, current_user)
     session.escalated = True
@@ -278,7 +305,7 @@ async def chat_resolve(
     logger.info(f"[CHAT] Resolved — session={request.session_id} turns={session.turn_count}")
 
     try:
-        last_ai = next((t.content for t in reversed(session.turns) if t.role == "assistant"), "")
+        last_ai    = next((t.content for t in reversed(session.turns) if t.role == "assistant"), "")
         first_user = next((t.content for t in session.turns if t.role == "user"), "")
         summary_text = f"PROBLEM: {first_user[:200]}\nRESOLUTION: {last_ai[:300]}"
 
@@ -286,8 +313,8 @@ async def chat_resolve(
 
         rag_service.store_resolved_conversation(
             session_summary = summary_text,
-            category         = nlp_result.category,
-            priority         = nlp_result.priority,
+            category        = nlp_result.category,
+            priority        = nlp_result.priority,
         )
     except Exception as e:
         logger.error(f"[CHAT] Failed to store resolved conversation: {e}")
@@ -314,25 +341,23 @@ async def chat_history(
         raise HTTPException(status_code=403, detail="Access denied")
 
     return {
-        "session_id":  session_id,
-        "turn_count":  session.turn_count,
-        "resolved":    session.resolved,
-        "escalated":   session.escalated,
-        "history":     session.get_full_history(),
-        "summary":     session.summary,
+        "session_id": session_id,
+        "turn_count": session.turn_count,
+        "resolved":   session.resolved,
+        "escalated":  session.escalated,
+        "history":    session.get_full_history(),
+        "summary":    session.summary,
     }
 
 
 async def _create_ticket_from_session(session, nlp_result, db: Session, current_user: User):
     chat_payload = {
         "session_id": session.session_id,
-        "messages": [{"role": t.role, "text": t.content} for t in session.turns]
+        "messages":   [{"role": t.role, "text": t.content} for t in session.turns]
     }
     ticket_input = ingest(source="chat", payload=chat_payload, user_id=current_user.id)
-    ticket = create_ticket_from_input(db, ticket_input)
-    ticket = create_ticket_from_input(db, ticket_input)
+    ticket       = create_ticket_from_input(db, ticket_input)  # ← fixed: was called twice
     check_for_incident(db, ticket)
-
 
     logger.info(
         f"[CHAT] Ticket created — {ticket.id} "

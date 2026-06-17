@@ -1,122 +1,140 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
-function App() {
-  const [count, setCount] = useState(0)
+import { AuthProvider, useAuth } from "./context/AuthContext";
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
 
-      <div className="ticks"></div>
+import Login from "./pages/Login";
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+// USER
+import UserDashboard from "./pages/user/Dashboard";
+import ChatView from "./pages/user/ChatView";
+import EmailView from "./pages/user/EmailView";
+import TicketsView from "./pages/user/TicketsView";
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+// HELPDESK
+import HelpdeskDashboard from "./pages/helpdesk/Dashboard";
+import HelpdeskAnalytics from "./pages/helpdesk/Analytics";
+
+// ENGINEER
+import EngineerDashboard from "./pages/engineer/Dashboard";
+
+// ADMIN
+import AdminDashboard from "./pages/admin/Dashboard";
+import AdminAllTickets from "./pages/admin/AllTickets";
+import AdminUserManagement from "./pages/admin/UserManagement";
+import AdminAnalytics from "./pages/admin/Analytics";
+
+function RoleDashboard() {
+  const { user } = useAuth();
+
+  switch (user?.role) {
+    case "helpdesk":
+      return <HelpdeskDashboard />;
+
+    case "engineer":
+      return <EngineerDashboard />;
+
+    case "admin":
+      return <AdminDashboard />;
+
+    default:
+      return <UserDashboard />;
+  }
 }
 
-export default App
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+
+        <Routes>
+
+          {/* LOGIN */}
+          <Route
+            path="/login"
+            element={<Login />}
+          />
+
+          {/* PROTECTED */}
+          <Route
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+
+            {/* DASHBOARD BY ROLE */}
+            <Route
+              path="/"
+              element={<RoleDashboard />}
+            />
+
+            {/* ========================= */}
+            {/* USER ROUTES */}
+            {/* ========================= */}
+
+            <Route
+              path="/user/chat"
+              element={<ChatView />}
+            />
+
+            <Route
+              path="/user/voice"
+              element={<ChatView mode="voice" />}
+            />
+
+            <Route
+              path="/user/email"
+              element={<EmailView />}
+            />
+
+            <Route
+              path="/user/tickets"
+              element={<TicketsView />}
+            />
+
+            {/* ========================= */}
+            {/* HELPDESK ROUTES */}
+            {/* ========================= */}
+
+            <Route
+              path="/helpdesk/analytics"
+              element={<HelpdeskAnalytics />}
+            />
+
+            {/* ========================= */}
+            {/* ADMIN ROUTES */}
+            {/* ========================= */}
+
+            <Route
+              path="/admin/tickets"
+              element={<AdminAllTickets />}
+            />
+
+            <Route
+              path="/admin/users"
+              element={<AdminUserManagement />}
+            />
+
+            <Route
+              path="/admin/analytics"
+              element={<AdminAnalytics />}
+            />
+
+          </Route>
+
+          {/* FALLBACK */}
+          <Route
+            path="*"
+            element={<Navigate to="/" />}
+          />
+
+        </Routes>
+
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
