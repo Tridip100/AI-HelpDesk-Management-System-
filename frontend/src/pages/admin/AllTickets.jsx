@@ -2,336 +2,323 @@ import { useState, useEffect } from "react";
 import client from "../../api/client";
 
 const STATUS_STYLES = {
-  open: "bg-slate-100 text-slate-700",
-  ai_pending: "bg-amber-100 text-amber-700",
-  auto_solved: "bg-emerald-100 text-emerald-700",
-  reviewing: "bg-blue-100 text-blue-700",
-  assigned: "bg-indigo-100 text-indigo-700",
-  in_progress: "bg-indigo-100 text-indigo-700",
-  resolved: "bg-emerald-100 text-emerald-700",
-  closed: "bg-slate-100 text-slate-600",
-  reopened: "bg-red-100 text-red-700",
-  escalated: "bg-red-100 text-red-700",
+  open:        "bg-slate-100 text-slate-600",
+  ai_pending:  "bg-amber-50 text-amber-600 border border-amber-200",
+  auto_solved: "bg-emerald-50 text-emerald-600 border border-emerald-200",
+  reviewing:   "bg-blue-50 text-blue-600 border border-blue-200",
+  assigned:    "bg-purple-50 text-purple-600 border border-purple-200",
+  in_progress: "bg-indigo-50 text-indigo-600 border border-indigo-200",
+  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
+  closed:      "bg-slate-100 text-slate-500",
+  reopened:    "bg-red-50 text-red-600 border border-red-200",
+  escalated:   "bg-red-50 text-red-600 border border-red-200",
 };
 
 const PRIORITY_STYLES = {
-  P1: "bg-red-100 text-red-700",
-  P2: "bg-orange-100 text-orange-700",
-  P3: "bg-blue-100 text-blue-700",
-  P4: "bg-slate-100 text-slate-700",
+  P1: "bg-red-50 text-red-600 border border-red-200",
+  P2: "bg-orange-50 text-orange-600 border border-orange-200",
+  P3: "bg-blue-50 text-blue-600 border border-blue-200",
+  P4: "bg-slate-100 text-slate-500",
 };
+
+const STATUS_ROW_ACCENT = {
+  open:        "hover:border-l-slate-400",
+  ai_pending:  "hover:border-l-amber-400",
+  auto_solved: "hover:border-l-emerald-400",
+  reviewing:   "hover:border-l-blue-400",
+  assigned:    "hover:border-l-purple-400",
+  in_progress: "hover:border-l-indigo-400",
+  resolved:    "hover:border-l-emerald-500",
+  closed:      "hover:border-l-slate-300",
+  reopened:    "hover:border-l-red-400",
+  escalated:   "hover:border-l-red-500",
+};
+
+const STATUS_ROW_BG = {
+  open:        "hover:bg-slate-50",
+  ai_pending:  "hover:bg-amber-50/50",
+  auto_solved: "hover:bg-emerald-50/50",
+  reviewing:   "hover:bg-blue-50/50",
+  assigned:    "hover:bg-purple-50/50",
+  in_progress: "hover:bg-indigo-50/50",
+  resolved:    "hover:bg-emerald-50/50",
+  closed:      "hover:bg-slate-50",
+  reopened:    "hover:bg-red-50/50",
+  escalated:   "hover:bg-red-50/50",
+};
+
+const OPEN_STATUSES        = ["open", "escalated", "reopened"];
+const IN_PROGRESS_STATUSES = ["assigned", "in_progress"];
+
+const FILTERS = [
+  { key: "all",         label: "All" },
+  { key: "open",        label: "Open" },
+  { key: "ai_pending",  label: "AI Pending" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "resolved",    label: "Resolved" },
+];
 
 function Badge({ text, styles }) {
   return (
-    <span
-      className={`text-xs font-medium px-3 py-1 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-600"
-        }`}
-    >
-      {text}
+    <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-500"}`}>
+      {text?.replace("_", " ")}
     </span>
   );
 }
 
 const getAuditColor = (action) => {
   const a = action?.toLowerCase() || "";
-  if (a.includes("created")) return "bg-green-50 border-green-400";
-  if (a.includes("assigned")) return "bg-blue-50 border-blue-400";
-  if (a.includes("sla")) return "bg-red-50 border-red-500";
+  if (a.includes("created"))  return "bg-green-50 border-green-400";
+  if (a.includes("assigned"))  return "bg-blue-50 border-blue-400";
+  if (a.includes("sla"))       return "bg-red-50 border-red-500";
   if (a.includes("escalated")) return "bg-orange-50 border-orange-500";
-  if (a.includes("resolved")) return "bg-emerald-50 border-emerald-500";
-  if (a.includes("closed")) return "bg-slate-50 border-slate-400";
+  if (a.includes("resolved"))  return "bg-emerald-50 border-emerald-500";
+  if (a.includes("closed"))    return "bg-slate-50 border-slate-400";
   return "bg-indigo-50 border-indigo-300";
 };
 
 const getAuditIcon = (action) => {
   const a = action?.toLowerCase() || "";
-  if (a.includes("created")) return "🟢";
-  if (a.includes("assigned")) return "🔵";
-  if (a.includes("sla")) return "🚨";
+  if (a.includes("created"))  return "🟢";
+  if (a.includes("assigned"))  return "🔵";
+  if (a.includes("sla"))       return "🚨";
   if (a.includes("escalated")) return "⚠️";
-  if (a.includes("resolved")) return "✅";
-  if (a.includes("closed")) return "📦";
+  if (a.includes("resolved"))  return "✅";
+  if (a.includes("closed"))    return "📦";
   return "📌";
 };
 
+/* ── Ticket Detail Modal ── */
+function TicketModal({ ticket, audit, onClose }) {
+  if (!ticket) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-slate-900 text-base leading-snug">{ticket.title}</p>
+            <p className="text-xs text-slate-400 font-mono mt-1">#{ticket.id?.slice(0, 8)} · {new Date(ticket.created_at).toLocaleString()}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors flex-shrink-0 mt-0.5">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M4 4l10 10M14 4L4 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Badges */}
+        <div className="px-6 py-3 flex gap-2 flex-wrap border-b border-slate-100 bg-slate-50">
+          {ticket.category && <Badge text={ticket.category} />}
+          <Badge text={ticket.priority} styles={PRIORITY_STYLES} />
+          <Badge text={ticket.status} styles={STATUS_STYLES} />
+          <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${ticket.sla_breached ? "bg-red-50 text-red-600 border border-red-200" : "bg-emerald-50 text-emerald-600 border border-emerald-200"}`}>
+            {ticket.sla_breached ? "SLA Breached" : "Within SLA"}
+          </span>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4 max-h-[55vh] overflow-y-auto">
+          {ticket.description && (
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Problem Description</p>
+              <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">{ticket.description}</p>
+            </div>
+          )}
+          {ticket.ai_suggestion && (
+            <div>
+              <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 inline-block" /> AI Recommendation
+              </p>
+              <p className="text-sm text-indigo-800 leading-relaxed bg-indigo-50 rounded-xl px-4 py-3 border border-indigo-100">{ticket.ai_suggestion}</p>
+            </div>
+          )}
+          {ticket.resolution_text && (
+            <div>
+              <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" /> Resolution
+              </p>
+              <p className="text-sm text-emerald-800 leading-relaxed bg-emerald-50 rounded-xl px-4 py-3 border border-emerald-100">{ticket.resolution_text}</p>
+            </div>
+          )}
+
+          {/* Audit Trail inside modal */}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Audit Trail</p>
+            <div className="space-y-2">
+              {audit.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-4">No audit events</p>
+              ) : audit.map(e => (
+                <div key={e.id} className={`rounded-xl p-3 border-l-4 ${getAuditColor(e.action)}`}>
+                  <p className="font-medium text-slate-900 text-sm">{getAuditIcon(e.action)} {e.action}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{e.actor} · {new Date(e.timestamp).toLocaleString()}</p>
+                  {e.notes && <p className="text-xs text-slate-600 mt-1">{e.notes}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 flex justify-end">
+          <button onClick={onClose} className="px-5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-colors">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminAllTickets() {
-  const [tickets, setTickets] = useState([]);
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [tickets, setTickets]   = useState([]);
+  const [search, setSearch]     = useState("");
+  const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState(null);
-  const [audit, setAudit] = useState([]);
+  const [audit, setAudit]       = useState([]);
+  const [activeFilter, setActiveFilter] = useState("all");
 
   useEffect(() => {
-    client.get("/tickets/").then((r) => {
-      setTickets(r.data);
-      setLoading(false);
-    });
+    client.get("/tickets/").then(r => { setTickets(r.data); setLoading(false); });
   }, []);
 
-  const filtered = tickets.filter(
-    (t) =>
-      t.title?.toLowerCase().includes(search.toLowerCase()) ||
-      t.id?.toLowerCase().includes(search.toLowerCase()) ||
-      t.category?.toLowerCase().includes(search.toLowerCase())
+  const searched = tickets.filter(t =>
+    t.title?.toLowerCase().includes(search.toLowerCase()) ||
+    t.id?.toLowerCase().includes(search.toLowerCase()) ||
+    t.category?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const loadAudit = async (ticket) => {
+  const filtered = activeFilter === "all"      ? searched
+    : activeFilter === "open"                  ? searched.filter(t => OPEN_STATUSES.includes(t.status))
+    : activeFilter === "in_progress"           ? searched.filter(t => IN_PROGRESS_STATUSES.includes(t.status))
+    : searched.filter(t => t.status === activeFilter);
+
+  const counts = FILTERS.reduce((acc, f) => {
+    const base = searched;
+    if (f.key === "all")              acc[f.key] = base.length;
+    else if (f.key === "open")        acc[f.key] = base.filter(t => OPEN_STATUSES.includes(t.status)).length;
+    else if (f.key === "in_progress") acc[f.key] = base.filter(t => IN_PROGRESS_STATUSES.includes(t.status)).length;
+    else acc[f.key] = base.filter(t => t.status === f.key).length;
+    return acc;
+  }, {});
+
+  const openTicket = async (ticket) => {
     setSelected(ticket);
     setAudit([]);
     try {
       const res = await client.get(`/admin/tickets/${ticket.id}/audit`);
       setAudit(res.data);
-    } catch { }
+    } catch {}
   };
 
   return (
-    <div className="w-full">
+    <>
+      <TicketModal ticket={selected} audit={audit} onClose={() => setSelected(null)} />
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">All Tickets</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            {tickets.length} total tickets in the system
-          </p>
+      <div className="w-full">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">All Tickets</h1>
+            <p className="text-sm text-slate-500 mt-1">{tickets.length} total tickets in the system</p>
+          </div>
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input
+              className="bg-white border border-slate-300 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-80"
+              placeholder="Search tickets..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
         </div>
 
-        <div className="relative">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            className="bg-white border border-slate-300 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-80"
-            placeholder="Search tickets..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Total Tickets</p>
-          <p className="text-3xl font-bold text-slate-900">{tickets.length}</p>
+        {/* Stats — clickable with zoom + coloured border */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          {[
+            { label: "Total Tickets", val: tickets.length,                                                        color: "text-slate-900",   hoverBorder: "hover:border-indigo-300", hoverBg: "hover:bg-indigo-50/30", filter: "all" },
+            { label: "Open",          val: tickets.filter(t => OPEN_STATUSES.includes(t.status)).length,          color: "text-amber-600",   hoverBorder: "hover:border-amber-300",  hoverBg: "hover:bg-amber-50/30",  filter: "open" },
+            { label: "Resolved",      val: tickets.filter(t => t.status === "resolved").length,                   color: "text-emerald-600", hoverBorder: "hover:border-emerald-300",hoverBg: "hover:bg-emerald-50/30",filter: "resolved" },
+            { label: "Escalated",     val: tickets.filter(t => t.status === "escalated").length,                  color: "text-red-600",     hoverBorder: "hover:border-red-300",    hoverBg: "hover:bg-red-50/30",    filter: "open" },
+          ].map(s => (
+            <button
+              key={s.label}
+              onClick={() => setActiveFilter(s.filter)}
+              className={`bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left
+                          transition-all duration-200 hover:scale-[1.03] hover:shadow-lg
+                          ${s.hoverBorder} ${s.hoverBg} group`}
+            >
+              <p className="text-sm text-slate-500">{s.label}</p>
+              <p className={`text-3xl font-bold mt-2 ${s.color}`}>{s.val}</p>
+              <p className="text-xs text-slate-400 mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">Click to filter →</p>
+            </button>
+          ))}
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Open</p>
-          <p className="text-3xl font-bold text-amber-600">
-            {tickets.filter((t) => t.status === "open").length}
-          </p>
+        {/* Filter tabs */}
+        <div className="flex gap-2 flex-wrap mb-5">
+          {FILTERS.map(f => (
+            <button
+              key={f.key}
+              onClick={() => setActiveFilter(f.key)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 border
+                ${activeFilter === f.key
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm scale-[1.03]"
+                  : "bg-white text-slate-600 border-slate-200 hover:scale-[1.03] hover:border-indigo-200 hover:text-indigo-600 hover:shadow-sm"
+                }`}
+            >
+              {f.label}
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${activeFilter === f.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+                {counts[f.key]}
+              </span>
+            </button>
+          ))}
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Resolved</p>
-          <p className="text-3xl font-bold text-emerald-600">
-            {tickets.filter((t) => t.status === "resolved").length}
-          </p>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Escalated</p>
-          <p className="text-3xl font-bold text-red-600">
-            {tickets.filter((t) => t.status === "escalated").length}
-          </p>
-        </div>
-      </div>
-      {/* ↑ Stats grid closed here — was missing in original */}
-
-      {/* Tickets Table + Audit Panel */}
-      <div className="grid grid-cols-3 gap-6">
-
-        {/* Tickets Table */}
-        <div className="col-span-2 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        {/* Table */}
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
           <table className="w-full text-sm">
             <thead className="bg-slate-50">
               <tr className="border-b border-slate-200">
-                <th className="text-left px-5 py-4 text-xs font-semibold text-slate-500 uppercase">
-                  ID
-                </th>
-                <th className="text-left px-5 py-4 text-xs font-semibold text-slate-500 uppercase">
-                  Title
-                </th>
-                <th className="text-left px-5 py-4 text-xs font-semibold text-slate-500 uppercase">
-                  Status
-                </th>
-                <th className="text-left px-5 py-4 text-xs font-semibold text-slate-500 uppercase">
-                  Priority
-                </th>
+                <th className="text-left px-5 py-4 text-xs font-semibold text-slate-500 uppercase">ID</th>
+                <th className="text-left px-5 py-4 text-xs font-semibold text-slate-500 uppercase">Title</th>
+                <th className="text-left px-5 py-4 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                <th className="text-left px-5 py-4 text-xs font-semibold text-slate-500 uppercase">Priority</th>
               </tr>
             </thead>
-
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr>
-                  <td colSpan={4} className="text-center py-16 text-slate-500">
-                    Loading tickets...
-                  </td>
-                </tr>
+                <tr><td colSpan={4} className="text-center py-16 text-slate-500">Loading tickets...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="text-center py-16 text-slate-500">
-                    No tickets found
+                <tr><td colSpan={4} className="text-center py-16 text-slate-500">No tickets found</td></tr>
+              ) : filtered.map(t => (
+                <tr
+                  key={t.id}
+                  onClick={() => openTicket(t)}
+                  className={`cursor-pointer border-l-4 border-l-transparent transition-all duration-200 group
+                    ${STATUS_ROW_BG[t.status] || "hover:bg-slate-50"}
+                    ${STATUS_ROW_ACCENT[t.status] || "hover:border-l-slate-300"}`}
+                >
+                  <td className="px-5 py-4 text-xs font-mono text-slate-500">#{t.id.slice(0, 8)}</td>
+                  <td className="px-5 py-4">
+                    <p className="font-medium text-slate-900 truncate max-w-[250px] group-hover:text-slate-700 transition-colors">{t.title}</p>
+                    {t.category && <p className="text-xs text-slate-400 capitalize mt-0.5">{t.category}</p>}
                   </td>
+                  <td className="px-5 py-4"><Badge text={t.status} styles={STATUS_STYLES} /></td>
+                  <td className="px-5 py-4"><Badge text={t.priority} styles={PRIORITY_STYLES} /></td>
                 </tr>
-              ) : (
-                filtered.map((t) => (
-                  <tr
-                    key={t.id}
-                    onClick={() => loadAudit(t)}
-                    className={`cursor-pointer transition-all hover:bg-indigo-50 ${selected?.id === t.id
-                        ? "bg-indigo-50 border-l-4 border-indigo-500"
-                        : ""
-                      }`}
-                  >
-                    <td className="px-5 py-4 text-xs font-mono text-slate-500">
-                      #{t.id.slice(0, 8)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="font-medium text-slate-900 truncate max-w-[250px]">
-                        {t.title}
-                      </p>
-                      {t.category && (
-                        <p className="text-xs text-slate-500 capitalize mt-1">
-                          {t.category}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-5 py-4">
-                      <Badge text={t.status} styles={STATUS_STYLES} />
-                    </td>
-                    <td className="px-5 py-4">
-                      <Badge text={t.priority} styles={PRIORITY_STYLES} />
-                    </td>
-                  </tr>
-                ))
-              )}
+              ))}
             </tbody>
           </table>
         </div>
-
-        {/* Audit / Detail Panel */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          {!selected ? (
-            <div className="flex flex-col items-center justify-center h-full py-20">
-              <div className="w-16 h-16 rounded-2xl bg-indigo-100 flex items-center justify-center mb-4">
-                🎫
-              </div>
-              <h3 className="font-semibold text-slate-900 mb-1">
-                Select a Ticket
-              </h3>
-              <p className="text-sm text-slate-500 text-center">
-                Click any ticket from the table to view details and audit history.
-              </p>
-            </div>
-          ) : (
-            <div>
-
-              {/* Ticket Header */}
-              <div className="mb-4">
-                <p className="text-xs font-mono text-slate-500 mb-1">
-                  #{selected.id.slice(0, 8)}
-                </p>
-                <h3 className="text-lg font-semibold text-slate-900">
-                  {selected.title}
-                </h3>
-              </div>
-
-              {/* Status & Priority */}
-              <div className="flex flex-wrap gap-2 mb-5">
-                <Badge text={selected.status} styles={STATUS_STYLES} />
-                <Badge text={selected.priority} styles={PRIORITY_STYLES} />
-              </div>
-
-              {/* Created & SLA */}
-              <div className="grid grid-cols-2 gap-3 mb-5">
-                <div className="bg-green-50 border border-green-200 rounded-xl p-3">
-                  <p className="text-xs font-medium text-green-700 mb-1">Created</p>
-                  <p className="font-semibold text-green-900">
-                    {selected.created_at
-                      ? new Date(selected.created_at).toLocaleDateString()
-                      : "N/A"}
-                  </p>
-                </div>
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-                  <p className="text-xs font-medium text-red-700 mb-1">SLA Status</p>
-                  <p className="font-semibold text-red-900">
-                    {selected.sla_breached ? "Escalated" : "Within SLA"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Description */}
-              {selected.description && (
-                <div className="mb-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                    Description
-                  </p>
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                    <p className="text-sm text-slate-700">{selected.description}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* AI Recommendation */}
-              {selected.ai_suggestion && (
-                <div className="mb-5">
-                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-4">
-                    <p className="text-sm font-semibold text-indigo-700 mb-2">
-                      🤖 AI Recommendation
-                    </p>
-                    <p className="text-sm text-slate-700">{selected.ai_suggestion}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Audit Trail */}
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
-                  Audit Trail
-                </p>
-                <div className="space-y-3 max-h-[350px] overflow-y-auto">
-                  {audit.length === 0 ? (
-                    <div className="text-center py-8 text-slate-500 text-sm">
-                      No audit events
-                    </div>
-                  ) : (
-                    audit.map((e) => (
-                      <div
-                        key={e.id}
-                        className={`rounded-xl p-3 border-l-4 ${getAuditColor(e.action)}`}
-                      >
-                        <p className="font-medium text-slate-900">
-                          {getAuditIcon(e.action)} {e.action}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-1">
-                          {e.actor} · {new Date(e.timestamp).toLocaleString()}
-                        </p>
-                        {e.notes && (
-                          <p className="text-xs text-slate-600 mt-2">{e.notes}</p>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-            </div>
-          )}
-        </div>
-
       </div>
-      {/* ↑ grid-cols-3 closed here */}
-
-    </div>
-    // ↑ max-w-7xl wrapper closed here
+    </>
   );
 }
