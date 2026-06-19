@@ -21,9 +21,26 @@ from backend.channels.channel_router import ingest
 from backend.services.knowledge_gap_service import log_gap
 from backend.services.anomaly_services import check_for_incident
 from backend.services.vision_service import describe_image
+from backend.services.solution_cache_service import store_solution
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+# ─────────────────────────────────────────
+# POSITIVE / NEGATIVE confirmation patterns
+# ─────────────────────────────────────────
+POSITIVE_REPLIES = [
+    "yes", "yep", "yeah", "yup", "solved", "fixed", "resolved",
+    "works", "working", "it works", "thank you", "thanks", "great",
+    "perfect", "awesome", "excellent", "done", "sorted", "all good",
+    "that worked", "it worked", "problem solved",
+]
+NEGATIVE_REPLIES = [
+    "no", "nope", "nah", "still", "not working", "not fixed",
+    "not resolved", "didn't work", "same issue", "same error",
+    "still broken", "still not", "doesn't work", "does not work",
+    "not yet", "negative",
+]
 
 
 class ChatMessageRequest(BaseModel):
@@ -42,6 +59,11 @@ class ResolveRequest(BaseModel):
     session_id: str
 
 
+class ResolveConfirmRequest(BaseModel):
+    session_id: str
+    resolved:   bool
+
+
 @router.post("/message")
 async def chat_message(
     request:      ChatMessageRequest,
@@ -56,9 +78,64 @@ async def chat_message(
     if session.escalated:
         raise HTTPException(status_code=400, detail="This conversation has been escalated. Check your tickets.")
 
-    chat_service.add_user_message(session_id, request.message)
+    # ─────────────────────────────────────────
+    # Auto-solve confirmation check
+    # If session is awaiting yes/no confirmation,
+    # handle it BEFORE adding to history or running pipeline
+    # ─────────────────────────────────────────
+    if getattr(session, "awaiting_confirmation", False):
+        user_msg    = request.message.strip().lower()
+        is_positive = any(p in user_msg for p in POSITIVE_REPLIES)
+        is_negative = any(p in user_msg for p in NEGATIVE_REPLIES)
 
-    logger.info(f"[CHAT] Message from user={current_user.id} session={session_id} turn={session.turn_count} engineer_mode={request.engineer_mode}")
+        session.awaiting_confirmation = False
+
+        if is_positive:
+            # User confirmed issue is resolved — store and close
+            first_user = next((t.content for t in session.turns if t.role == "user"), "")
+            last_ai    = next((t.content for t in reversed(session.turns) if t.role == "assistant"), "")
+            nlp_r      = nlp_service.analyze(first_user[:500])
+
+            try:
+                rag_service.store_resolved_conversation(
+                    session_summary = f"PROBLEM: {first_user[:200]}\nSOLUTION: {last_ai[:300]}",
+                    category        = nlp_r.category,
+                    priority        = nlp_r.priority,
+                )
+                store_solution(first_user, last_ai, 0.92, nlp_r.category, nlp_r.priority)
+            except Exception as e:
+                logger.error(f"[CHAT] Failed to store auto-solved: {e}")
+
+            session.resolved = True
+            chat_service.delete_session(session_id)
+            logger.info(f"[CHAT] Auto-solved confirmed — session={session_id}")
+
+            async def auto_solved_stream():
+                msg = "That's great to hear! I'm glad I could help. Your issue has been marked as resolved. Have a great day! 🎉"
+                yield f"data: {json.dumps({'type': 'status', 'stage': 'thinking', 'label': 'Generating your answer...'})}\n\n"
+                for word in msg.split():
+                    yield f"data: {word} \n\n"
+                yield f"data: {json.dumps({'type': 'auto_solved', 'session_id': session_id})}\n\n"
+                yield f"data: {json.dumps({'type': 'confidence', 'value': 0.99, 'session_id': session_id})}\n\n"
+
+            return StreamingResponse(auto_solved_stream(), media_type="text/event-stream")
+
+        elif is_negative:
+            # User says not resolved — add message to history and continue
+            chat_service.add_user_message(session_id, request.message)
+            logger.info(f"[CHAT] Auto-solve rejected — continuing session={session_id}")
+            # Fall through to normal pipeline below
+        else:
+            # Ambiguous reply — treat as new message, continue normally
+            chat_service.add_user_message(session_id, request.message)
+
+    else:
+        chat_service.add_user_message(session_id, request.message)
+
+    logger.info(
+        f"[CHAT] Message from user={current_user.id} session={session_id} "
+        f"turn={session.turn_count} engineer_mode={request.engineer_mode}"
+    )
 
     recent_turns, summary = await chat_service.build_context_for_llm(session)
     conversation = []
@@ -67,41 +144,31 @@ async def chat_message(
     conversation.extend(recent_turns)
 
     # ─────────────────────────────────────────
-    # Engineer mode — bypass normal AI pipeline,
-    # send directly to LLM with engineer system prompt
-    # Engineers are internal staff — they can ask anything
+    # Engineer mode — unrestricted LLM access
     # ─────────────────────────────────────────
     if request.engineer_mode:
         from backend.services import llm_services as llm_service
 
         async def engineer_stream():
-            # Build engineer-specific message with ticket context
-            if request.ticket_context:
-                engineer_message = (
-                    f"Ticket context:\n{request.ticket_context}\n\n"
-                    f"Engineer's question: {request.message}"
-                )
-            else:
-                engineer_message = request.message
+            engineer_message = (
+                f"Ticket context:\n{request.ticket_context}\n\n"
+                f"Engineer's question: {request.message}"
+            ) if request.ticket_context else request.message
 
             full_response = ""
-
             async for token in llm_service.generate_stream(
-                nlp_summary  = engineer_message,
-                conversation = conversation,
-                raw_message  = engineer_message,
+                nlp_summary   = engineer_message,
+                conversation  = conversation,
+                raw_message   = engineer_message,
                 engineer_mode = True,
             ):
                 if token.startswith('{"type"'):
-                    # confidence signal — send as-is
                     yield f"data: {token}\n\n"
                     continue
                 full_response += token
                 yield f"data: {token} \n\n"
 
             chat_service.add_ai_response(session_id, full_response, 0.9)
-
-            # Engineer chats don't create tickets or escalate
             yield f"data: {json.dumps({'type': 'confidence', 'value': 0.9, 'session_id': session_id})}\n\n"
 
         return StreamingResponse(engineer_stream(), media_type="text/event-stream")
@@ -135,17 +202,34 @@ async def chat_message(
         }
         yield f"data: {json.dumps(nlp_meta)}\n\n"
 
+        # Stream response words
         for word in response_text.split():
             yield f"data: {word} \n\n"
 
-        chat_service.add_ai_response(session_id, response_text, confidence)
+        # ── Auto-solve confirmation ───────────────────────────
+        # Append confirmation question if AI is confident
+        # and issue doesn't need a ticket
+        confirmation_text = ""
+        if confidence >= 0.70 and not pipeline_result.get("should_create_ticket"):
+            confirmation_text = " Did this resolve your issue? (yes / no)"
+            session.awaiting_confirmation = True
+            for word in confirmation_text.split():
+                yield f"data: {word} \n\n"
+
+        chat_service.add_ai_response(
+            session_id,
+            response_text + confirmation_text,
+            confidence,
+        )
 
         logger.info(
             f"[CHAT] Response complete — tier={pipeline_result['tier']} "
-            f"confidence={confidence} turn={session.turn_count}/{chat_service.MAX_TURNS}"
+            f"confidence={confidence} turn={session.turn_count}/{chat_service.MAX_TURNS} "
+            f"awaiting_confirmation={session.awaiting_confirmation}"
         )
 
         if pipeline_result["should_create_ticket"]:
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'creating_ticket', 'label': 'Creating support ticket...'})}\n\n"
             log_gap(db, nlp_result, pipeline_result, source="chat")
             effective_nlp = nlp_result or nlp_service.analyze(session.to_ticket_content()[:500])
             ticket = await _create_ticket_from_session(session, effective_nlp, db, current_user)
@@ -154,9 +238,9 @@ async def chat_message(
             return
 
         should_esc, reason = chat_service.should_escalate(session, confidence)
-
         if should_esc:
             logger.info(f"[CHAT] Escalating — {reason}")
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'escalating', 'label': 'Creating support ticket...'})}\n\n"
             effective_nlp = nlp_result or nlp_service.analyze(session.to_ticket_content()[:500])
             ticket = await _create_ticket_from_session(session, effective_nlp, db, current_user)
             session.escalated = True
@@ -189,9 +273,8 @@ async def chat_message_with_image(
 
     logger.info(f"[CHAT] Image received from user={current_user.id} session={session_id} ({len(image_bytes)} bytes)")
 
-    description = await describe_image(image_bytes)
-    # Strip backtick fences from vision model output
-    description = description.replace("```", "").strip()
+    description   = await describe_image(image_bytes)
+    description   = description.replace("```", "").strip()
     logger.info(f"[CHAT] Vision description: {description[:150]}")
 
     user_msg      = message.strip() or "Please help me with this issue shown in the screenshot."
@@ -240,9 +323,17 @@ async def chat_message_with_image(
         for word in response_text.split():
             yield f"data: {word} \n\n"
 
-        chat_service.add_ai_response(session_id, response_text, confidence)
+        confirmation_text = ""
+        if confidence >= 0.70 and not pipeline_result.get("should_create_ticket"):
+            confirmation_text = " Did this resolve your issue? (yes / no)"
+            session.awaiting_confirmation = True
+            for word in confirmation_text.split():
+                yield f"data: {word} \n\n"
+
+        chat_service.add_ai_response(session_id, response_text + confirmation_text, confidence)
 
         if pipeline_result["should_create_ticket"]:
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'creating_ticket', 'label': 'Creating support ticket...'})}\n\n"
             log_gap(db, nlp_result, pipeline_result, source="chat")
             effective_nlp = nlp_result or nlp_service.analyze(session.to_ticket_content()[:500])
             ticket = await _create_ticket_from_session(session, effective_nlp, db, current_user)
@@ -252,6 +343,7 @@ async def chat_message_with_image(
 
         should_esc, reason = chat_service.should_escalate(session, confidence)
         if should_esc:
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'escalating', 'label': 'Creating support ticket...'})}\n\n"
             effective_nlp = nlp_result or nlp_service.analyze(session.to_ticket_content()[:500])
             ticket = await _create_ticket_from_session(session, effective_nlp, db, current_user)
             session.escalated = True
@@ -276,8 +368,7 @@ async def chat_escalate(
 
     conversation_text = session.to_ticket_content()
     nlp_result        = nlp_service.analyze(conversation_text[:500])
-
-    ticket = await _create_ticket_from_session(session, nlp_result, db, current_user)
+    ticket            = await _create_ticket_from_session(session, nlp_result, db, current_user)
     session.escalated = True
 
     logger.info(f"[CHAT] Manual escalation — session={request.session_id} ticket={ticket.id}")
@@ -301,21 +392,20 @@ async def chat_resolve(
         raise HTTPException(status_code=404, detail="Session not found")
 
     session.resolved = True
-
     logger.info(f"[CHAT] Resolved — session={request.session_id} turns={session.turn_count}")
 
     try:
-        last_ai    = next((t.content for t in reversed(session.turns) if t.role == "assistant"), "")
-        first_user = next((t.content for t in session.turns if t.role == "user"), "")
+        last_ai      = next((t.content for t in reversed(session.turns) if t.role == "assistant"), "")
+        first_user   = next((t.content for t in session.turns if t.role == "user"), "")
         summary_text = f"PROBLEM: {first_user[:200]}\nRESOLUTION: {last_ai[:300]}"
-
-        nlp_result = nlp_service.analyze(first_user)
+        nlp_result   = nlp_service.analyze(first_user)
 
         rag_service.store_resolved_conversation(
             session_summary = summary_text,
             category        = nlp_result.category,
             priority        = nlp_result.priority,
         )
+        store_solution(first_user, last_ai, 0.85, nlp_result.category, nlp_result.priority)
     except Exception as e:
         logger.error(f"[CHAT] Failed to store resolved conversation: {e}")
 
@@ -327,6 +417,46 @@ async def chat_resolve(
         "turns":      session.turn_count,
         "message":    "Great! Glad we could help. Session closed."
     }
+
+
+@router.post("/confirm-resolve")
+async def confirm_resolve(
+    request:      ResolveConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    db:           Session = Depends(get_db),
+):
+    """
+    Explicit confirm-resolve endpoint (called from frontend buttons).
+    The inline yes/no detection in /message handles the conversational flow.
+    This endpoint handles explicit button-click confirmation.
+    """
+    session = chat_service.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if request.resolved:
+        first_user = next((t.content for t in session.turns if t.role == "user"), "")
+        last_ai    = next((t.content for t in reversed(session.turns) if t.role == "assistant"), "")
+        nlp_result = nlp_service.analyze(first_user[:500])
+
+        try:
+            rag_service.store_resolved_conversation(
+                session_summary = f"PROBLEM: {first_user[:200]}\nSOLUTION: {last_ai[:300]}",
+                category        = nlp_result.category,
+                priority        = nlp_result.priority,
+            )
+            store_solution(first_user, last_ai, 0.90, nlp_result.category, nlp_result.priority)
+        except Exception as e:
+            logger.error(f"[CHAT] Failed to store confirm-resolve: {e}")
+
+        session.resolved = True
+        chat_service.delete_session(request.session_id)
+        logger.info(f"[CHAT] Confirm-resolve: auto_solved — session={request.session_id}")
+
+        return {"status": "auto_solved", "session_id": request.session_id}
+    else:
+        session.awaiting_confirmation = False
+        return {"status": "continuing", "session_id": request.session_id}
 
 
 @router.get("/history/{session_id}")
@@ -356,7 +486,7 @@ async def _create_ticket_from_session(session, nlp_result, db: Session, current_
         "messages":   [{"role": t.role, "text": t.content} for t in session.turns]
     }
     ticket_input = ingest(source="chat", payload=chat_payload, user_id=current_user.id)
-    ticket       = create_ticket_from_input(db, ticket_input)  # ← fixed: was called twice
+    ticket       = create_ticket_from_input(db, ticket_input)
     check_for_incident(db, ticket)
 
     logger.info(

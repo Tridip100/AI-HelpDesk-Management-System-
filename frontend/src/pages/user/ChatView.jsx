@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { Brain, Check, Globe, Search, Ticket } from "lucide-react";
 import { IconChat, IconMic, IconPhone, IconSend, IconStop, IconTicket, IconWrench } from "../../components/Icons";
+
+const STAGE_ICON = {
+  analyzing:        Search,
+  cache_check:      Brain,
+  knowledge_base:   Brain,
+  web_search:       Globe,
+  thinking:         Brain,
+  creating_ticket:  Ticket,
+  escalating:       Ticket,
+};
 
 function TypingDots() {
   return (
@@ -26,6 +37,7 @@ export default function ChatView({ mode, onTicketCreated }) {
   const [sessionId, setSessionId] = useState(null);
   const [sending, setSending] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [statusSteps, setStatusSteps] = useState([]);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const fileRef = useRef(null);
@@ -60,8 +72,20 @@ export default function ChatView({ mode, onTicketCreated }) {
           try {
             const parsed = JSON.parse(trimmed);
             if (parsed.session_id) setSessionId(parsed.session_id);
+            if (parsed.type === "status") {
+              setStatusSteps((prev) => [...prev, parsed]);
+              continue;
+            }
             if (parsed.type === "vision") {
               setMessages((prev) => [...prev, { role: "system", content: `Screenshot understood: ${parsed.description}` }]);
+            }
+            if (parsed.type === "auto_solved") {
+              setMessages(prev => [...prev, {
+                role: "system",
+                content: "✅ Issue marked as resolved by AI",
+                isAutoSolved: true,
+              }]);
+              return;
             }
             if (parsed.type === "escalated") {
               setMessages((prev) => [...prev, { role: "system", content: `Ticket created: ${parsed.ticket_id}` }]);
@@ -74,6 +98,7 @@ export default function ChatView({ mode, onTicketCreated }) {
         if (!started) {
           started = true;
           setThinking(false);
+          setStatusSteps([]);
           setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
         }
         aiText += data;
@@ -93,6 +118,7 @@ export default function ChatView({ mode, onTicketCreated }) {
     setInput("");
     setSending(true);
     setThinking(true);
+    setStatusSteps([]);
 
     try {
       let res;
@@ -228,8 +254,38 @@ export default function ChatView({ mode, onTicketCreated }) {
           ))}
           {thinking && (
             <div className="flex justify-start">
-              <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
-                <TypingDots />
+              <div className="flex items-end gap-2 max-w-[80%]">
+                <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                  <Brain size={14} className="text-indigo-600" />
+                </div>
+                <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-white border border-slate-200 shadow-sm min-w-[220px]">
+                  {statusSteps.length === 0 ? <TypingDots /> : (
+                    <div className="space-y-1.5">
+                      {statusSteps.map((s, i) => {
+                        const Icon   = STAGE_ICON[s.stage] || Brain;
+                        const isLast = i === statusSteps.length - 1;
+                        return (
+                          <div key={i} className={`flex items-center gap-2 text-xs transition-all ${isLast ? "text-slate-700" : "text-slate-400"}`}>
+                            {isLast ? (
+                              <Icon size={12} className="text-indigo-400 flex-shrink-0" />
+                            ) : (
+                              <Check size={12} className="text-emerald-500 flex-shrink-0" />
+                            )}
+                            <span className={isLast ? "" : "line-through"}>{s.label}</span>
+                            {isLast && (
+                              <span className="flex gap-0.5 ml-auto">
+                                {[0,1,2].map(j => (
+                                  <span key={j} className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce"
+                                    style={{ animationDelay: `${j*0.15}s` }} />
+                                ))}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -277,4 +333,3 @@ export default function ChatView({ mode, onTicketCreated }) {
     </div>
   );
 }
-

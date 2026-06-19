@@ -13,6 +13,18 @@ const TIERS = [
   { code: "Tier 3C", desc: "Critical/security — urgent helpdesk, no AI" },
 ];
 
+export const CATEGORY_ITEMS = [
+  { code: "network", label: "Network", color: "#2563eb" },
+  { code: "auth", label: "Account Access", color: "#7c3aed" },
+  { code: "hardware", label: "Hardware", color: "#f97316" },
+  { code: "database", label: "Database", color: "#0891b2" },
+  { code: "cloud_app", label: "Cloud App", color: "#4f46e5" },
+  { code: "software", label: "Software", color: "#10b981" },
+  { code: "security", label: "Security", color: "#dc2626" },
+  { code: "hr_it", label: "HR IT", color: "#be123c" },
+  { code: "other", label: "Other", color: "#64748b" },
+];
+
 export default function ClassificationLegend() {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
@@ -31,6 +43,17 @@ export default function ClassificationLegend() {
           <div key={t.code} className="flex gap-2 text-xs">
             <span className="font-medium text-purple-300 w-16 flex-shrink-0">{t.code}</span>
             <span className="text-slate-500">{t.desc}</span>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs font-medium text-slate-400 mb-3 mt-4">Ticket categories</p>
+      <div className="grid grid-cols-2 gap-2">
+        {CATEGORY_ITEMS.map((c) => (
+          <div key={c.code} className="rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-2">
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} />
+              <p className="text-xs font-semibold text-slate-200">{c.label}</p>
+            </div>
           </div>
         ))}
       </div>

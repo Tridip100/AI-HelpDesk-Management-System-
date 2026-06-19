@@ -1,17 +1,17 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import client from "../../api/client";
+import { CATEGORY_ITEMS } from "../../components/ClassificationLegend";
+import { labelStatus, isOpenStatus, isAssignedStatus, isAutoSolvedStatus, isResolvedStatus, isDoneStatus } from "../../lib/ui";
+
+const CATEGORY_CODES = new Set(CATEGORY_ITEMS.map(item => item.code));
 
 const STATUS_STYLES = {
   open:        "bg-slate-100 text-slate-600",
-  ai_pending:  "bg-amber-50 text-amber-600 border border-amber-200",
-  auto_solved: "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  reviewing:   "bg-blue-50 text-blue-600 border border-blue-200",
   assigned:    "bg-purple-50 text-purple-600 border border-purple-200",
-  in_progress: "bg-indigo-50 text-indigo-600 border border-indigo-200",
-  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  closed:      "bg-slate-100 text-slate-500",
-  reopened:    "bg-red-50 text-red-600 border border-red-200",
   escalated:   "bg-red-50 text-red-600 border border-red-200",
+  auto_solved: "bg-indigo-50 text-indigo-600 border border-indigo-200",
+  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
 };
 
 const PRIORITY_STYLES = {
@@ -23,48 +23,46 @@ const PRIORITY_STYLES = {
 
 const STATUS_ROW_ACCENT = {
   open:        "hover:border-l-slate-400",
-  ai_pending:  "hover:border-l-amber-400",
-  auto_solved: "hover:border-l-emerald-400",
-  reviewing:   "hover:border-l-blue-400",
   assigned:    "hover:border-l-purple-400",
-  in_progress: "hover:border-l-indigo-400",
-  resolved:    "hover:border-l-emerald-500",
-  closed:      "hover:border-l-slate-300",
-  reopened:    "hover:border-l-red-400",
   escalated:   "hover:border-l-red-500",
+  auto_solved: "hover:border-l-indigo-400",
+  resolved:    "hover:border-l-emerald-500",
 };
 
 const STATUS_ROW_BG = {
   open:        "hover:bg-slate-50",
-  ai_pending:  "hover:bg-amber-50/50",
-  auto_solved: "hover:bg-emerald-50/50",
-  reviewing:   "hover:bg-blue-50/50",
   assigned:    "hover:bg-purple-50/50",
-  in_progress: "hover:bg-indigo-50/50",
-  resolved:    "hover:bg-emerald-50/50",
-  closed:      "hover:bg-slate-50",
-  reopened:    "hover:bg-red-50/50",
   escalated:   "hover:bg-red-50/50",
+  auto_solved: "hover:bg-indigo-50/50",
+  resolved:    "hover:bg-emerald-50/50",
 };
-
-const OPEN_STATUSES        = ["open", "escalated", "reopened"];
-const IN_PROGRESS_STATUSES = ["assigned", "in_progress"];
 
 const FILTERS = [
   { key: "all",         label: "All" },
   { key: "open",        label: "Open" },
-  { key: "ai_pending",  label: "AI Pending" },
-  { key: "in_progress", label: "In Progress" },
+  { key: "assigned",    label: "Assigned" },
+  { key: "escalated",   label: "Escalated" },
+  { key: "auto_solved", label: "AI Solved" },
   { key: "resolved",    label: "Resolved" },
 ];
 
 function Badge({ text, styles }) {
   return (
     <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-500"}`}>
-      {text?.replace("_", " ")}
+      {labelStatus(text)}
     </span>
   );
 }
+
+const normalizeCategory = (ticket) => {
+  const raw = typeof ticket.category === "object" ? ticket.category?.value : ticket.category;
+  const eventNote = ticket.events
+    ?.map(e => e.notes || "")
+    .find(note => /category:\s*([a-z_]+)/i.test(note));
+  const fromEvent = eventNote?.match(/category:\s*([a-z_]+)/i)?.[1];
+  const category = String(raw || fromEvent || "other").toLowerCase();
+  return CATEGORY_CODES.has(category) ? category : "other";
+};
 
 const getAuditColor = (action) => {
   const a = action?.toLowerCase() || "";
@@ -176,6 +174,7 @@ function TicketModal({ ticket, audit, onClose }) {
 }
 
 export default function AdminAllTickets() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tickets, setTickets]   = useState([]);
   const [search, setSearch]     = useState("");
   const [loading, setLoading]   = useState(true);
@@ -187,25 +186,64 @@ export default function AdminAllTickets() {
     client.get("/tickets/").then(r => { setTickets(r.data); setLoading(false); });
   }, []);
 
+  useEffect(() => {
+    setActiveFilter(searchParams.get("filter") || "all");
+  }, [searchParams]);
+
+  const dateInRange = (value, start, end) => {
+    if (!value || !start) return true;
+    const created = new Date(value);
+    const from = new Date(`${start}T00:00:00`);
+    const to = new Date(`${end || start}T23:59:59.999`);
+    return created >= from && created <= to;
+  };
+
   const searched = tickets.filter(t =>
     t.title?.toLowerCase().includes(search.toLowerCase()) ||
     t.id?.toLowerCase().includes(search.toLowerCase()) ||
     t.category?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const filtered = activeFilter === "all"      ? searched
-    : activeFilter === "open"                  ? searched.filter(t => OPEN_STATUSES.includes(t.status))
-    : activeFilter === "in_progress"           ? searched.filter(t => IN_PROGRESS_STATUSES.includes(t.status))
-    : searched.filter(t => t.status === activeFilter);
+  const urlFiltered = searched.filter(t => {
+    const start = searchParams.get("start");
+    const end = searchParams.get("end");
+    const category = searchParams.get("category");
+    const priority = searchParams.get("priority");
+    const assignedTo = searchParams.get("assigned_to");
+    const resolution = searchParams.get("resolution");
+
+    if (!dateInRange(t.created_at, start, end)) return false;
+    if (category && normalizeCategory(t) !== category) return false;
+    if (priority && t.priority !== priority) return false;
+    if (assignedTo && t.assigned_to !== assignedTo && t.assigned_to_user?.id !== assignedTo) return false;
+    if (resolution === "ai" && !isAutoSolvedStatus(t.status)) return false;
+    if (resolution === "manual" && !isResolvedStatus(t.status)) return false;
+    if (resolution === "engineer" && !(isResolvedStatus(t.status) && t.resolution_path === "engineer")) return false;
+    if (resolution === "helpdesk" && !(isResolvedStatus(t.status) && t.resolution_path === "helpdesk")) return false;
+    return true;
+  });
+
+  const filtered = activeFilter === "all"      ? urlFiltered
+    : activeFilter === "open"                  ? urlFiltered.filter(t => isOpenStatus(t.status))
+    : activeFilter === "assigned"              ? urlFiltered.filter(t => isAssignedStatus(t.status))
+    : activeFilter === "resolved"              ? urlFiltered.filter(t => isDoneStatus(t.status))
+    : urlFiltered.filter(t => t.status === activeFilter);
 
   const counts = FILTERS.reduce((acc, f) => {
-    const base = searched;
+    const base = urlFiltered;
     if (f.key === "all")              acc[f.key] = base.length;
-    else if (f.key === "open")        acc[f.key] = base.filter(t => OPEN_STATUSES.includes(t.status)).length;
-    else if (f.key === "in_progress") acc[f.key] = base.filter(t => IN_PROGRESS_STATUSES.includes(t.status)).length;
+    else if (f.key === "open")        acc[f.key] = base.filter(t => isOpenStatus(t.status)).length;
+    else if (f.key === "assigned")    acc[f.key] = base.filter(t => isAssignedStatus(t.status)).length;
+    else if (f.key === "resolved")    acc[f.key] = base.filter(t => isDoneStatus(t.status)).length;
     else acc[f.key] = base.filter(t => t.status === f.key).length;
     return acc;
   }, {});
+
+  const clearUrlFilters = () => {
+    setSearchParams(activeFilter === "all" ? {} : { filter: activeFilter });
+  };
+
+  const drilldownLabel = searchParams.get("label");
 
   const openTicket = async (ticket) => {
     setSelected(ticket);
@@ -225,7 +263,9 @@ export default function AdminAllTickets() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-slate-900">All Tickets</h1>
-            <p className="text-sm text-slate-500 mt-1">{tickets.length} total tickets in the system</p>
+            <p className="text-sm text-slate-500 mt-1">
+              {filtered.length} shown from {tickets.length} total tickets{drilldownLabel ? ` · ${drilldownLabel}` : ""}
+            </p>
           </div>
           <div className="relative">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -240,13 +280,22 @@ export default function AdminAllTickets() {
           </div>
         </div>
 
+        {drilldownLabel && (
+          <div className="mb-5 flex items-center justify-between bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+            <p className="text-sm text-indigo-700 font-medium">Filtered by {drilldownLabel}</p>
+            <button onClick={clearUrlFilters} className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+              Clear drilldown
+            </button>
+          </div>
+        )}
+
         {/* Stats — clickable with zoom + coloured border */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
           {[
             { label: "Total Tickets", val: tickets.length,                                                        color: "text-slate-900",   hoverBorder: "hover:border-indigo-300", hoverBg: "hover:bg-indigo-50/30", filter: "all" },
-            { label: "Open",          val: tickets.filter(t => OPEN_STATUSES.includes(t.status)).length,          color: "text-amber-600",   hoverBorder: "hover:border-amber-300",  hoverBg: "hover:bg-amber-50/30",  filter: "open" },
-            { label: "Resolved",      val: tickets.filter(t => t.status === "resolved").length,                   color: "text-emerald-600", hoverBorder: "hover:border-emerald-300",hoverBg: "hover:bg-emerald-50/30",filter: "resolved" },
-            { label: "Escalated",     val: tickets.filter(t => t.status === "escalated").length,                  color: "text-red-600",     hoverBorder: "hover:border-red-300",    hoverBg: "hover:bg-red-50/30",    filter: "open" },
+            { label: "Open",          val: tickets.filter(t => isOpenStatus(t.status)).length,                    color: "text-amber-600",   hoverBorder: "hover:border-amber-300",  hoverBg: "hover:bg-amber-50/30",  filter: "open" },
+            { label: "Resolved",      val: tickets.filter(t => isDoneStatus(t.status)).length,                    color: "text-emerald-600", hoverBorder: "hover:border-emerald-300",hoverBg: "hover:bg-emerald-50/30",filter: "resolved" },
+            { label: "Escalated",     val: tickets.filter(t => t.status === "escalated").length,                  color: "text-red-600",     hoverBorder: "hover:border-red-300",    hoverBg: "hover:bg-red-50/30",    filter: "escalated" },
           ].map(s => (
             <button
               key={s.label}

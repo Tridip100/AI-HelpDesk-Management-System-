@@ -6,18 +6,12 @@ import enum
 
 from backend.database import Base
 
-# in models/ticket.py — add to TicketStatus enum
 class TicketStatus(str, enum.Enum):
     open        = "open"
-    ai_pending  = "ai_pending"
-    auto_solved = "auto_solved"
-    reviewing   = "reviewing"
     assigned    = "assigned"
-    escalated   = "escalated"   # ← ADD THIS
-    in_progress = "in_progress"
+    escalated   = "escalated"
+    auto_solved = "auto_solved"
     resolved    = "resolved"
-    closed      = "closed"
-    reopened    = "reopened"
 
 
 class TicketPriority(str, enum.Enum):

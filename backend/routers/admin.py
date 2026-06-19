@@ -13,6 +13,7 @@ from backend.models.ticket_event import TicketEvent
 from datetime import datetime, timedelta
 from backend.middleware.rbac import current_user_admin, current_user_helpdesk_or_above
 
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
@@ -303,3 +304,41 @@ async def shift_digest(
     """
     from backend.services.digest_service import generate_digest
     return await generate_digest(db, hours)
+
+@router.get("/learning-stats")
+def learning_stats(
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user_admin),
+):
+    from backend.ingestion.base_ingestor import get_chroma_client
+    client = get_chroma_client()
+
+    stats = {}
+    # FIXED: sop_documents not sop_chunks
+    for name in ["solution_cache", "resolved_tickets", "sop_documents"]:
+        try:
+            coll = client.get_or_create_collection(name)
+            stats[name] = coll.count()
+        except Exception:
+            stats[name] = 0
+
+    try:
+        cache_coll = client.get_or_create_collection("solution_cache")
+        sample = cache_coll.get(limit=5, include=["metadatas", "documents"])
+        recent_learned = [
+            {
+                "category": m.get("category"),
+                "problem":  m.get("problem_preview", "")[:100],
+                "uses":     m.get("use_count", "0"),
+            }
+            for m in sample.get("metadatas", [])
+        ]
+    except Exception:
+        recent_learned = []
+
+    return {
+        "solution_cache_size":   stats.get("solution_cache", 0),
+        "resolved_tickets_size": stats.get("resolved_tickets", 0),
+        "sop_chunks_size":       stats.get("sop_documents", 0),  # FIXED key source
+        "recently_learned":      recent_learned,
+    }

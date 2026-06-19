@@ -3,7 +3,7 @@
 # Phase 8 — SLA Escalation Agent
 #
 # Periodically checks open tickets against their sla_deadline.
-# If a ticket has breached its SLA and isn't resolved/closed:
+# If a ticket has breached its SLA and isn't resolved:
 #   - bump priority by one level (P4→P3→P2→P1, capped at P1)
 #   - mark status as "escalated"
 #   - log a TicketEvent (sla_escalated)
@@ -33,8 +33,8 @@ PRIORITY_ESCALATION = {
 
 # Statuses considered "still open" — SLA applies
 ACTIVE_STATUSES = [
-    TicketStatus.open, TicketStatus.ai_pending, TicketStatus.reviewing,
-    TicketStatus.assigned, TicketStatus.in_progress, TicketStatus.reopened,
+    TicketStatus.open,
+    TicketStatus.assigned,
 ]
 
 

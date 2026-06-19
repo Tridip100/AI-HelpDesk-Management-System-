@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import client from "../../api/client";
+import { isDoneStatus, labelStatus } from "../../lib/ui";
 
 const ROLE_STYLES = {
   user:     "bg-blue-50 text-blue-600 border border-blue-200",
@@ -11,6 +13,37 @@ const ROLE_STYLES = {
 const getInitials = (u) =>
   u.full_name?.split(" ").map(n => n[0]).join("").slice(0, 2) ||
   u.username?.[0]?.toUpperCase() || "?";
+
+const displayUserName = (value, users = []) => {
+  if (!value) return "Unassigned";
+  const user = users.find(u => u.id === value || u.username === value || u.email === value);
+  return user?.full_name || user?.username || String(value).slice(0, 12);
+};
+
+const minutesBetween = (start, end) => {
+  if (!start || !end) return null;
+  const diff = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(diff) || diff < 0) return null;
+  return Math.round(diff / 60000);
+};
+
+const formatMinutes = (minutes) => {
+  if (minutes == null) return "Pending";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+};
+
+const helpdeskAssignmentEvent = (ticket, user) =>
+  ticket.events?.find(e => {
+    const actor = e.actor_label?.toLowerCase() || "";
+    return ["assigned", "reassigned", "helpdesk_reviewed"].includes(e.action) && (
+      e.actor_id === user.id ||
+      actor.includes(user.username?.toLowerCase() || "___") ||
+      actor.includes(user.full_name?.toLowerCase() || "___")
+    );
+  });
 
 const strengthLabel = (p) => {
   if (!p) return null;
@@ -105,19 +138,205 @@ function PasswordDropdown({ user, onClose, onSave }) {
   );
 }
 
+function UserDetailsModal({ user, users, tickets, onClose }) {
+  if (!user) return null;
+
+  const raised = tickets.filter(t => t.created_by === user.id || t.created_by_user?.id === user.id);
+  const assigned = tickets.filter(t => t.assigned_to === user.id || t.assigned_to_user?.id === user.id);
+  const raisedSolved = raised.filter(t => isDoneStatus(t.status));
+  const raisedUnresolved = raised.filter(t => !isDoneStatus(t.status));
+  const assignedSolved = assigned.filter(t => isDoneStatus(t.status));
+  const assignedUnresolved = assigned.filter(t => !isDoneStatus(t.status));
+  const assignedByHelpdesk = tickets.filter(t =>
+    t.assigned_by === user.id ||
+    t.assigned_by_user?.id === user.id ||
+    t.helpdesk_id === user.id ||
+    t.reviewed_by === user.id ||
+    t.routed_by === user.id ||
+    t.assigned_by_username === user.username ||
+    Boolean(helpdeskAssignmentEvent(t, user))
+  );
+  const helpdeskResponseTimes = assignedByHelpdesk
+    .map(t => minutesBetween(t.created_at, t.assigned_at || t.reviewed_at || t.first_response_at || helpdeskAssignmentEvent(t, user)?.created_at))
+    .filter(v => v !== null);
+  const avgHelpdeskResponse = helpdeskResponseTimes.length
+    ? Math.round(helpdeskResponseTimes.reduce((sum, v) => sum + v, 0) / helpdeskResponseTimes.length)
+    : null;
+  const assignedWithinTime = assignedByHelpdesk.filter(t => {
+    if (typeof t.assigned_within_sla === "boolean") return t.assigned_within_sla;
+    const actionAt = t.assigned_at || t.reviewed_at || helpdeskAssignmentEvent(t, user)?.created_at;
+    if (t.assignment_due_at && actionAt) return new Date(actionAt) <= new Date(t.assignment_due_at);
+    return !t.sla_breached;
+  });
+  const helpdeskNotSolved = assignedByHelpdesk.filter(t => !isDoneStatus(t.status));
+
+  const statCards = user.role === "user" ? [
+    { label: "Problems Raised", value: raised.length, color: "text-blue-600" },
+    { label: "Solved", value: raisedSolved.length, color: "text-emerald-600" },
+    { label: "Not Solved", value: raisedUnresolved.length, color: "text-amber-600" },
+  ] : user.role === "helpdesk" ? [
+    { label: "Assigned", value: assignedByHelpdesk.length, color: "text-indigo-600" },
+    { label: "Within Time", value: assignedWithinTime.length, color: "text-emerald-600" },
+    { label: "Not Solved", value: helpdeskNotSolved.length, color: "text-amber-600" },
+    { label: "Avg Reaction", value: formatMinutes(avgHelpdeskResponse), color: "text-blue-600" },
+  ] : [
+    { label: "Tickets Assigned", value: assigned.length, color: "text-indigo-600" },
+    { label: "Solved", value: assignedSolved.length, color: "text-emerald-600" },
+    { label: "Not Solved", value: assignedUnresolved.length, color: "text-amber-600" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-slate-100 flex items-start gap-4">
+          <div className="w-14 h-14 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-base font-bold flex-shrink-0">
+            {getInitials(user)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-bold text-slate-900 truncate">{user.full_name || user.username}</h2>
+            <p className="text-sm text-slate-500 truncate">{user.email}</p>
+            <div className="flex gap-2 flex-wrap mt-3">
+              <span className={`text-xs font-medium px-3 py-1 rounded-full ${ROLE_STYLES[user.role]}`}>{user.role}</span>
+              <span className="text-xs font-medium px-3 py-1 rounded-full bg-slate-100 text-slate-600">{user.department || "Unassigned department"}</span>
+              <span className={`text-xs font-medium px-3 py-1 rounded-full ${user.is_active ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-red-50 text-red-600 border border-red-200"}`}>
+                {user.is_active ? "Active" : "Inactive"}
+              </span>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-5 grid grid-cols-1 md:grid-cols-4 gap-4">
+          {statCards.map(s => (
+            <div key={s.label} className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">{s.label}</p>
+              <p className={`text-3xl font-bold mt-2 ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-6 pb-6">
+          {user.role === "user" && (
+            <>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Raised Problems</p>
+              {raised.length === 0 ? (
+                <p className="text-sm text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">No raised tickets yet.</p>
+              ) : (
+                <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-xl">
+                  {raised.map(t => (
+                    <div key={t.id} className="px-4 py-3 border-b border-slate-100 last:border-b-0">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-slate-900 truncate">{t.title}</p>
+                        <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full flex-shrink-0 ${isDoneStatus(t.status) ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-amber-50 text-amber-600 border border-amber-200"}`}>
+                          {isDoneStatus(t.status) ? "Solved" : "Not solved"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Engineer: {t.assigned_to_user?.full_name || displayUserName(t.assigned_to, users)} · {t.priority} · {new Date(t.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {user.role === "helpdesk" && (
+            <>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Assignment Performance</p>
+              {assignedByHelpdesk.length === 0 ? (
+                <p className="text-sm text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">No assignment data linked to this helpdesk user yet.</p>
+              ) : (
+                <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-xl">
+                  {assignedByHelpdesk.map(t => {
+                    const event = helpdeskAssignmentEvent(t, user);
+                    const actionAt = t.assigned_at || t.reviewed_at || t.first_response_at || event?.created_at;
+                    const reaction = minutesBetween(t.created_at, actionAt);
+                    const withinTime = typeof t.assigned_within_sla === "boolean"
+                      ? t.assigned_within_sla
+                      : t.assignment_due_at && actionAt
+                        ? new Date(actionAt) <= new Date(t.assignment_due_at)
+                        : !t.sla_breached;
+                    return (
+                      <div key={t.id} className="px-4 py-3 border-b border-slate-100 last:border-b-0">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-medium text-slate-900 truncate">{t.title}</p>
+                          <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full flex-shrink-0 ${isDoneStatus(t.status) ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-amber-50 text-amber-600 border border-amber-200"}`}>
+                            {isDoneStatus(t.status) ? "Solved" : "Not solved"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Assigned to {t.assigned_to_user?.full_name || displayUserName(t.assigned_to, users)} · reaction {formatMinutes(reaction)} · {withinTime ? "within time" : "late"}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {user.role === "engineer" && (
+            <>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Engineer Performance</p>
+              {assigned.length === 0 ? (
+                <p className="text-sm text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">No assigned tickets yet.</p>
+              ) : (
+            <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-xl">
+              {assigned.slice(0, 8).map(t => (
+                <div key={t.id} className="px-4 py-3 border-b border-slate-100 last:border-b-0 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-900 truncate">{t.title}</p>
+                    <p className="text-xs text-slate-400">{t.priority} · {new Date(t.created_at).toLocaleDateString()}</p>
+                  </div>
+                  <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 flex-shrink-0">{labelStatus(t.status)}</span>
+                </div>
+              ))}
+            </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminUserManagement() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [users, setUsers]       = useState([]);
+  const [tickets, setTickets]   = useState([]);
   const [search, setSearch]     = useState("");
   const [loading, setLoading]   = useState(true);
   const [editing, setEditing]   = useState(null);
   const [newRole, setNewRole]   = useState("");
+  const [roleFilter, setRoleFilter] = useState(searchParams.get("role") || "all");
+  const [deptFilter, setDeptFilter] = useState(searchParams.get("department") || "all");
+  const [selectedUser, setSelectedUser] = useState(null);
   const [resetting, setResetting] = useState(null);
   const [saving, setSaving]     = useState(false);
   const [msg, setMsg]           = useState("");
 
   useEffect(() => {
-    client.get("/admin/users").then(r => { setUsers(r.data); setLoading(false); });
+    Promise.all([
+      client.get("/admin/users"),
+      client.get("/tickets/"),
+    ]).then(([u, t]) => { setUsers(u.data); setTickets(t.data); setLoading(false); });
   }, []);
+
+  useEffect(() => {
+    setRoleFilter(searchParams.get("role") || "all");
+    setDeptFilter(searchParams.get("department") || "all");
+  }, [searchParams]);
+
+  useEffect(() => {
+    const requested = searchParams.get("user");
+    if (!requested || users.length === 0) return;
+    const match = users.find(u => u.id === requested || u.username === requested);
+    if (match) setSelectedUser(match);
+  }, [searchParams, users]);
 
   useEffect(() => {
     if (!resetting) return;
@@ -126,11 +345,29 @@ export default function AdminUserManagement() {
     return () => document.removeEventListener("mousedown", handler);
   }, [resetting]);
 
-  const filtered = users.filter(u =>
-    u.username?.toLowerCase().includes(search.toLowerCase()) ||
-    u.email?.toLowerCase().includes(search.toLowerCase()) ||
-    u.full_name?.toLowerCase().includes(search.toLowerCase())
-  );
+  const departments = [...new Set(users.map(u => u.department || "Unassigned").filter(Boolean))].sort();
+
+  const updateFilters = (next) => {
+    const params = new URLSearchParams(searchParams);
+    Object.entries(next).forEach(([key, value]) => {
+      if (!value || value === "all") params.delete(key);
+      else params.set(key, value);
+    });
+    params.delete("user");
+    setSearchParams(params);
+  };
+
+  const filtered = users.filter(u => {
+    const text = search.toLowerCase();
+    const matchesSearch =
+      u.username?.toLowerCase().includes(text) ||
+      u.email?.toLowerCase().includes(text) ||
+      u.full_name?.toLowerCase().includes(text) ||
+      u.department?.toLowerCase().includes(text);
+    const matchesRole = roleFilter === "all" || u.role === roleFilter;
+    const matchesDept = deptFilter === "all" || (u.department || "Unassigned") === deptFilter;
+    return matchesSearch && matchesRole && matchesDept;
+  });
 
   const showMsg = (text) => { setMsg(text); setTimeout(() => setMsg(""), 2500); };
 
@@ -160,6 +397,8 @@ export default function AdminUserManagement() {
 
   return (
     <div className="w-full">
+      <UserDetailsModal user={selectedUser} users={users} tickets={tickets} onClose={() => setSelectedUser(null)} />
+
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -192,15 +431,45 @@ export default function AdminUserManagement() {
           { label: "Engineers", role: "engineer", color: "text-emerald-600", hoverBorder: "hover:border-emerald-300", hoverBg: "hover:bg-emerald-50/30" },
           { label: "Admins",    role: "admin",    color: "text-orange-600",  hoverBorder: "hover:border-orange-300",  hoverBg: "hover:bg-orange-50/30" },
         ].map(s => (
-          <div key={s.role}
+          <button key={s.role}
+            onClick={() => updateFilters({ role: roleFilter === s.role ? "all" : s.role })}
             className={`bg-white border border-slate-200 rounded-2xl p-5 shadow-sm
+                        text-left
                         transition-all duration-200 hover:scale-[1.03] hover:shadow-lg
+                        ${roleFilter === s.role ? "ring-2 ring-indigo-500 border-indigo-200" : ""}
                         ${s.hoverBorder} ${s.hoverBg}`}
           >
             <p className="text-sm text-slate-500">{s.label}</p>
             <p className={`text-3xl font-bold mt-2 ${s.color}`}>{roleCounts[s.role] || 0}</p>
-          </div>
+          </button>
         ))}
+      </div>
+
+      <div className="flex flex-wrap gap-3 mb-5">
+        <select
+          value={roleFilter}
+          onChange={e => updateFilters({ role: e.target.value })}
+          className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <option value="all">All roles</option>
+          <option value="user">Users</option>
+          <option value="helpdesk">Helpdesk</option>
+          <option value="engineer">Engineers</option>
+          <option value="admin">Admins</option>
+        </select>
+        <select
+          value={deptFilter}
+          onChange={e => updateFilters({ department: e.target.value })}
+          className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <option value="all">All departments</option>
+          {departments.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        {(roleFilter !== "all" || deptFilter !== "all") && (
+          <button onClick={() => updateFilters({ role: "all", department: "all" })} className="text-sm font-medium text-slate-500 hover:text-indigo-600 px-3 py-2">
+            Clear filters
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -210,18 +479,19 @@ export default function AdminUserManagement() {
             <tr className="border-b border-slate-200 bg-slate-50">
               <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[22%]">Name</th>
               <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[22%]">Email</th>
+              <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[14%]">Department</th>
               <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[10%]">Status</th>
-              <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[23%]">Role</th>
-              <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[23%]">Password</th>
+              <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[16%]">Role</th>
+              <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[16%]">Password</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={5} className="text-center py-16 text-slate-500">Loading users...</td></tr>
+              <tr><td colSpan={6} className="text-center py-16 text-slate-500">Loading users...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={5} className="text-center py-16 text-slate-500">No users found</td></tr>
+              <tr><td colSpan={6} className="text-center py-16 text-slate-500">No users found</td></tr>
             ) : filtered.map(u => (
-              <tr key={u.id} className="hover:bg-slate-50 transition-colors relative group">
+              <tr key={u.id} onClick={() => setSelectedUser(u)} className="hover:bg-slate-50 transition-colors relative group cursor-pointer">
                 {/* Name */}
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
@@ -239,10 +509,13 @@ export default function AdminUserManagement() {
                 {/* Email */}
                 <td className="px-6 py-4 text-slate-600">{u.email}</td>
 
+                {/* Department */}
+                <td className="px-6 py-4 text-slate-600">{u.department || "Unassigned"}</td>
+
                 {/* Status */}
                 <td className="px-6 py-4">
                   <button
-                    onClick={() => toggleActive(u)}
+                    onClick={(e) => { e.stopPropagation(); toggleActive(u); }}
                     className={`text-xs font-medium px-3 py-1 rounded-full transition-all duration-200 hover:scale-105 ${
                       u.is_active
                         ? "bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100"
@@ -259,6 +532,7 @@ export default function AdminUserManagement() {
                     <div className="flex items-center gap-2">
                       <select
                         value={newRole}
+                        onClick={e => e.stopPropagation()}
                         onChange={e => setNewRole(e.target.value)}
                         className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       >
@@ -267,14 +541,14 @@ export default function AdminUserManagement() {
                         <option value="engineer">engineer</option>
                         <option value="admin">admin</option>
                       </select>
-                      <button onClick={() => saveRole(u.id)} disabled={saving}
+                      <button onClick={(e) => { e.stopPropagation(); saveRole(u.id); }} disabled={saving}
                         className="text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50">
                         Save
                       </button>
-                      <button onClick={() => setEditing(null)} className="text-xs text-slate-500 hover:text-slate-700">Cancel</button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditing(null); }} className="text-xs text-slate-500 hover:text-slate-700">Cancel</button>
                     </div>
                   ) : (
-                    <button onClick={() => { setEditing(u.id); setNewRole(u.role); setResetting(null); }}
+                    <button onClick={(e) => { e.stopPropagation(); setEditing(u.id); setNewRole(u.role); setResetting(null); }}
                       className="group/role flex items-center gap-2">
                       <span className={`text-xs font-medium px-3 py-1 rounded-full transition-all duration-200 hover:scale-105 ${ROLE_STYLES[u.role]}`}>
                         {u.role}
@@ -290,7 +564,7 @@ export default function AdminUserManagement() {
                 {/* Password */}
                 <td className="px-6 py-4 relative" data-pwd-dropdown>
                   <button
-                    onClick={() => { setResetting(resetting === u.id ? null : u.id); setEditing(null); }}
+                    onClick={(e) => { e.stopPropagation(); setResetting(resetting === u.id ? null : u.id); setEditing(null); }}
                     className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg transition-all duration-200 ${
                       resetting === u.id
                         ? "bg-indigo-50 text-indigo-600 border border-indigo-200"

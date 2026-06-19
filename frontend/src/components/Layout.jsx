@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   LayoutDashboard, Ticket, Users, BarChart3,
   LogOut, MessageSquare, Wrench, HeadphonesIcon, BarChart2,
+  Brain,
 } from "lucide-react";
 
 const NAV = {
@@ -12,6 +13,7 @@ const NAV = {
     { path: "/admin/tickets",   label: "All Tickets",     icon: Ticket },
     { path: "/admin/users",     label: "User Management", icon: Users },
     { path: "/admin/analytics", label: "Analytics",       icon: BarChart3 },
+    { path: "/admin/learning",  label: "Learning",        icon: Brain },
   ],
   helpdesk: [
     { path: "/",                      label: "Ticket Queue", icon: HeadphonesIcon },

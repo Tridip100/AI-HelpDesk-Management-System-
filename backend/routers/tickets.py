@@ -200,12 +200,12 @@ def reopen_ticket(
         raise HTTPException(status_code=403, detail="Access denied")
 
     prev_status = ticket.status
-    ticket.status = TicketStatus.reopened
+    ticket.status = TicketStatus.open
     ticket.resolved_at = None
 
     log_event(db, ticket.id, action=EventAction.reopened,
               actor=current_user, prev_status=str(prev_status),
-              new_status=TicketStatus.reopened,
+              new_status=TicketStatus.open.value,
               notes="User indicated issue was not resolved")
     db.commit()
     db.refresh(ticket)

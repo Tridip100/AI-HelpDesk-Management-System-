@@ -1,18 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import client from "../../api/client";
+import { labelStatus, isOpenStatus, isAssignedStatus, isDoneStatus } from "../../lib/ui";
 
 const STATUS_STYLES = {
   open:        "bg-slate-100 text-slate-600",
-  ai_pending:  "bg-amber-50 text-amber-600 border border-amber-200",
-  auto_solved: "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  reviewing:   "bg-blue-50 text-blue-600 border border-blue-200",
   assigned:    "bg-purple-50 text-purple-600 border border-purple-200",
-  in_progress: "bg-indigo-50 text-indigo-600 border border-indigo-200",
-  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  closed:      "bg-slate-100 text-slate-500",
-  reopened:    "bg-red-50 text-red-600 border border-red-200",
   escalated:   "bg-red-50 text-red-600 border border-red-200",
+  auto_solved: "bg-indigo-50 text-indigo-600 border border-indigo-200",
+  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
 };
 
 const PRIORITY_STYLES = {
@@ -25,48 +21,34 @@ const PRIORITY_STYLES = {
 // left border accent per status
 const STATUS_BORDER = {
   open:        "hover:border-l-slate-400",
-  ai_pending:  "hover:border-l-amber-400",
-  auto_solved: "hover:border-l-emerald-400",
-  reviewing:   "hover:border-l-blue-400",
   assigned:    "hover:border-l-purple-400",
-  in_progress: "hover:border-l-indigo-500",
-  resolved:    "hover:border-l-emerald-500",
-  closed:      "hover:border-l-slate-300",
-  reopened:    "hover:border-l-red-400",
   escalated:   "hover:border-l-red-500",
+  auto_solved: "hover:border-l-indigo-500",
+  resolved:    "hover:border-l-emerald-500",
 };
 
 // bg tint per status
 const STATUS_BG = {
   open:        "hover:bg-slate-50",
-  ai_pending:  "hover:bg-amber-50/60",
-  auto_solved: "hover:bg-emerald-50/60",
-  reviewing:   "hover:bg-blue-50/60",
   assigned:    "hover:bg-purple-50/60",
-  in_progress: "hover:bg-indigo-50/60",
-  resolved:    "hover:bg-emerald-50/60",
-  closed:      "hover:bg-slate-50",
-  reopened:    "hover:bg-red-50/60",
   escalated:   "hover:bg-red-50/60",
+  auto_solved: "hover:bg-indigo-50/60",
+  resolved:    "hover:bg-emerald-50/60",
 };
-
-// "open" = not yet picked up
-const OPEN_STATUSES        = ["open", "escalated", "reopened"];
-// "in_progress" = assigned to engineer
-const IN_PROGRESS_STATUSES = ["assigned", "in_progress"];
 
 const FILTERS = [
   { key: "all",         label: "All Tickets" },
   { key: "open",        label: "Open" },
-  { key: "ai_pending",  label: "AI Pending" },
-  { key: "in_progress", label: "In Progress" },
+  { key: "assigned",    label: "Assigned" },
+  { key: "escalated",   label: "Escalated" },
+  { key: "auto_solved", label: "AI Solved" },
   { key: "resolved",    label: "Resolved" },
 ];
 
 function Badge({ text, styles }) {
   return (
     <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-500"}`}>
-      {text?.replace("_", " ")}
+      {labelStatus(text)}
     </span>
   );
 }
@@ -163,15 +145,18 @@ export default function TicketsView() {
   const filtered = activeFilter === "all"
     ? tickets
     : activeFilter === "open"
-    ? tickets.filter(t => OPEN_STATUSES.includes(t.status))
-    : activeFilter === "in_progress"
-    ? tickets.filter(t => IN_PROGRESS_STATUSES.includes(t.status))
+    ? tickets.filter(t => isOpenStatus(t.status))
+    : activeFilter === "assigned"
+    ? tickets.filter(t => isAssignedStatus(t.status))
+    : activeFilter === "resolved"
+    ? tickets.filter(t => isDoneStatus(t.status))
     : tickets.filter(t => t.status === activeFilter);
 
   const counts = FILTERS.reduce((acc, f) => {
     if (f.key === "all")              acc[f.key] = tickets.length;
-    else if (f.key === "open")        acc[f.key] = tickets.filter(t => OPEN_STATUSES.includes(t.status)).length;
-    else if (f.key === "in_progress") acc[f.key] = tickets.filter(t => IN_PROGRESS_STATUSES.includes(t.status)).length;
+    else if (f.key === "open")        acc[f.key] = tickets.filter(t => isOpenStatus(t.status)).length;
+    else if (f.key === "assigned")    acc[f.key] = tickets.filter(t => isAssignedStatus(t.status)).length;
+    else if (f.key === "resolved")    acc[f.key] = tickets.filter(t => isDoneStatus(t.status)).length;
     else acc[f.key] = tickets.filter(t => t.status === f.key).length;
     return acc;
   }, {});

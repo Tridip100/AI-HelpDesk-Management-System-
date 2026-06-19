@@ -126,56 +126,99 @@ class NLPResult:
 # KEYWORD RULES
 # ─────────────────────────────────────────
 CATEGORY_KEYWORDS = {
-    "hardware": [
-        "laptop", "keyboard", "mouse", "monitor", "screen", "printer",
-        "charger", "battery", "usb", "hdmi", "cable", "headset",
-        "webcam", "speaker", "microphone", "hard drive", "ram",
-        "cracked", "broken", "damaged", "not turning on", "overheating",
-        "touchpad", "trackpad", "docking station", "projector",
-        "unplugging", "replugging", "unplug", "replug",
-        "not working", "stopped working",
-        "device", "hardware", "peripheral", "physical",
-    ],
     "network": [
-        "vpn", "wifi", "internet", "network", "ethernet", "connection",
-        "ping", "dns", "ip address", "firewall", "proxy", "bandwidth",
-        "disconnecting", "no internet", "slow connection", "timeout",
-        "router", "switch", "port", "gateway", "packet loss",
+        # specific first — wifi problem should ALWAYS be network
+        "wifi", "wi-fi", "wireless", "vpn", "internet", "network",
+        "ethernet", "connection", "ping", "dns", "ip address",
+        "firewall", "proxy", "bandwidth", "disconnecting", "no internet",
+        "slow connection", "timeout", "router", "switch", "port",
+        "gateway", "packet loss", "cannot connect", "can't connect",
+        "no wifi", "wifi not working", "internet not working",
+        "network issue", "network problem", "offline", "no signal",
+        "connected but no internet", "limited connectivity",
+        "wifi keeps disconnecting", "vpn not connecting",
     ],
     "auth": [
-        "password", "login", "logout", "access denied", "locked out",
-        "two factor", "2fa", "mfa", "sso", "active directory", "ldap",
-        "permission", "unauthorized", "credential", "token expired",
-        "forgot password", "reset password", "account locked",
+        "password", "login", "logout", "sign in", "sign out",
+        "access denied", "locked out", "two factor", "2fa", "mfa",
+        "sso", "active directory", "ldap", "permission", "unauthorized",
+        "credential", "token expired", "forgot password",
+        "reset password", "account locked", "cannot login",
+        "can't log in", "authentication", "invalid password",
+        "account disabled", "blocked account",
+    ],
+    "hardware": [
+        # only truly hardware-specific terms — no generic "not working"
+        "laptop", "keyboard", "mouse", "monitor", "screen", "printer",
+        "charger", "battery", "usb", "hdmi", "cable", "headset",
+        "webcam", "speaker", "microphone", "hard drive", "ssd",
+        "ram", "memory stick", "cracked", "broken screen",
+        "damaged", "not turning on", "won't turn on", "dead laptop",
+        "overheating", "touchpad", "trackpad", "docking station",
+        "projector", "power button", "fan noise", "blue screen",
+        "bsod", "physical damage", "device not detected",
+        "peripheral", "hardware failure", "burnt", "smoking",
+        "printer not detected",
+        "printer not working",
+        "printer offline",
+        "screen not working",
+        "keyboard not working",
+        "mouse not working",
+        "monitor not displaying",
+        "printer is offline",
     ],
     "software": [
-        "install", "update", "upgrade", "crash", "error", "bug",
-        "not responding", "freezing", "slow", "uninstall", "license",
+        "install", "installation", "update", "upgrade", "crash",
+        "crashing", "error", "bug", "not responding", "freezing",
+        "frozen", "slow app", "uninstall", "license", "activation",
         "microsoft", "office", "excel", "word", "outlook", "teams",
         "zoom", "slack", "chrome", "firefox", "adobe", "sap",
-        "application", "app", "software", "program", "executable",
+        "application", "app crash", "software", "program",
+        "executable", "setup", "configuration", "settings",
+        "software error", "app not opening", "program not starting",
+        "dll error", "runtime error", "version",
     ],
     "security": [
         "virus", "malware", "ransomware", "phishing", "hacked",
         "breach", "suspicious", "infected", "spam", "data leak",
-        "unauthorized access", "stolen", "compromised", "threat",
-        "firewall blocked", "intrusion", "suspicious email",
+        "unauthorized access", "stolen credentials", "compromised",
+        "threat", "firewall blocked", "intrusion",
+        "suspicious email", "scam", "identity theft",
+        "security alert", "account compromised", "cybersecurity",
     ],
     "database": [
         "database", "sql", "query", "connection string", "db error",
         "postgresql", "mysql", "oracle", "mongodb", "backup", "restore",
         "data corruption", "table", "migration", "deadlock",
+        "db connection", "database down", "cannot connect to db",
+        "stored procedure", "schema", "index", "transaction",
+        "database connection",
+        "database connection failed",
+        "db connection failed",
+        "cannot connect to database",
+        "database down",
+        "sql connection",
+        "database error",
     ],
     "cloud_app": [
         "azure", "aws", "gcp", "cloud", "sharepoint", "onedrive",
         "google drive", "dropbox", "salesforce", "jira", "confluence",
         "servicenow", "workday", "s3", "bucket", "subscription",
+        "saas", "cloud storage", "cloud service", "365", "google workspace",
     ],
     "hr_it": [
         "onboarding", "offboarding", "new employee", "laptop request",
         "access request", "provisioning", "account creation",
         "employee leaving", "transfer", "department change",
-        "new joiner", "exit", "new hire",
+        "new joiner", "exit process", "new hire", "joining",
+        "equipment request", "new staff",
+        "new employee needs laptop",
+        "new hire laptop",
+        "laptop for new employee",
+        "setup new employee",
+        "new employee setup",
+        "employee onboarding",
+        "new staff setup",
     ],
 }
 
@@ -345,29 +388,39 @@ def extract_keywords(text: str) -> list:
 
 def detect_category_from_keywords(text: str) -> Optional[tuple]:
     """
-    Keyword-based category detection.
+    Keyword-based category detection with phrase-length weighting.
+    Longer keyword matches score higher than short generic ones.
 
-    Confidence formula — based on number of matches:
-      0 matches → None     → BERT will run
-      1 match   → 0.60     → skip BERT (one specific IT keyword is strong signal)
-      2 matches → 0.80     → skip BERT
-      3+ matches → 0.95    → skip BERT (very confident)
+    Scoring per match:
+      1-word  = 1 point
+      2-word  = 2 points
+      3-word  = 4 points
+      4+ word = 6 points
 
-    Why match-count not proportion:
-      Old: confidence = matches/list_length * 10
-           "keyboard" alone → 1/24*10 = 0.41 → borderline → unpredictable
-      New: "keyboard" alone → 0.60 → always skips BERT ✅
+    Confidence:
+      score >= 6  → 0.95
+      score >= 3  → 0.80
+      score >= 1  → 0.60
     """
     text_lower = text.lower()
     scores = {}
 
     for category, kws in CATEGORY_KEYWORDS.items():
-        matches = sum(
-            1 for kw in kws
-            if re.search(r'\b' + re.escape(kw) + r'\b', text_lower)
-        )
-        if matches > 0:
-            scores[category] = matches
+        total_score = 0
+        for kw in kws:
+            pattern = r'\b' + re.escape(kw) + r'\b'
+            if re.search(pattern, text_lower):
+                word_count = len(kw.split())
+                if word_count >= 4:
+                    total_score += 6
+                elif word_count == 3:
+                    total_score += 4
+                elif word_count == 2:
+                    total_score += 2
+                else:
+                    total_score += 1
+        if total_score > 0:
+            scores[category] = total_score
 
     if not scores:
         return None
@@ -375,11 +428,11 @@ def detect_category_from_keywords(text: str) -> Optional[tuple]:
     best       = max(scores, key=scores.get)
     best_score = scores[best]
 
-    if best_score >= 3:
+    if best_score >= 6:
         confidence = 0.95
-    elif best_score == 2:
+    elif best_score >= 3:
         confidence = 0.80
-    elif best_score == 1:
+    elif best_score >= 1:
         confidence = 0.60
     else:
         confidence = 0.0

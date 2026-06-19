@@ -5,6 +5,7 @@ import {
   ArrowLeft, TrendingUp, Clock, CheckCircle2,
   AlertTriangle, BarChart2, RefreshCw,
 } from "lucide-react";
+import { labelStatus, isDoneStatus, isResolvedStatus } from "../../lib/ui";
 
 /* ── colour maps ── */
 const CATEGORY_COLORS = {
@@ -16,24 +17,21 @@ const CATEGORY_COLORS = {
   other:    "#94a3b8",
 };
 const STATUS_COLORS = {
-  resolved:    "#16a34a",
-  closed:      "#64748b",
-  escalated:   "#dc2626",
-  in_progress: "#4f46e5",
   open:        "#94a3b8",
-  assigned:    "#7c3aed",
-  ai_pending:  "#d97706",
-  reopened:    "#ef4444",
+  assigned:    "#4f46e5",
+  escalated:   "#dc2626",
+  auto_solved: "#6366f1",
+  resolved:    "#16a34a",
 };
 const PRIORITY_COLORS = { P1: "#dc2626", P2: "#ea580c", P3: "#2563eb", P4: "#94a3b8" };
 
 /* ── Animated horizontal bar ── */
-function AnimatedBar({ label, val, max, color, sublabel }) {
+function AnimatedBar({ label, val, max, color, sublabel, onClick }) {
   const [width, setWidth] = useState(0);
   const pct = max ? Math.round((val / max) * 100) : 0;
   useEffect(() => { const id = setTimeout(() => setWidth(pct), 120); return () => clearTimeout(id); }, [pct]);
   return (
-    <div className="flex items-center gap-3 group">
+    <button type="button" onClick={onClick} className="flex items-center gap-3 group text-left">
       <span className="text-xs text-slate-500 w-20 text-right flex-shrink-0 truncate" title={label}>{label}</span>
       <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden">
         <div
@@ -43,12 +41,12 @@ function AnimatedBar({ label, val, max, color, sublabel }) {
         />
       </div>
       <span className="text-xs font-medium text-slate-600 w-6 text-right flex-shrink-0">{val}</span>
-    </div>
+    </button>
   );
 }
 
 /* ── Donut ── */
-function DonutChart({ segments, centerLabel, centerSub }) {
+function DonutChart({ segments, centerLabel, centerSub, onSegmentClick }) {
   const [hovered, setHovered] = useState(null);
   const [animated, setAnimated] = useState(false);
   const r = 56, cx = 70, cy = 70, strokeW = 18;
@@ -83,6 +81,7 @@ function DonutChart({ segments, centerLabel, centerSub }) {
             }}
             onMouseEnter={() => setHovered(i)}
             onMouseLeave={() => setHovered(null)}
+            onClick={() => onSegmentClick?.(a)}
           />
         ))}
         <text x={cx} y={cy - 6} textAnchor="middle" fontSize={16} fontWeight={600}
@@ -100,9 +99,10 @@ function DonutChart({ segments, centerLabel, centerSub }) {
             style={{ opacity: hovered !== null && hovered !== i ? 0.35 : 1 }}
             onMouseEnter={() => setHovered(i)}
             onMouseLeave={() => setHovered(null)}
+            onClick={() => onSegmentClick?.(s)}
           >
             <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} />
-            <span className="text-slate-600 flex-1 capitalize">{s.label.replace("_", " ")}</span>
+            <span className="text-slate-600 flex-1">{s.label}</span>
             <span className="font-medium text-slate-800">{s.count}</span>
             <span className="text-slate-400 text-xs w-9 text-right">{s.pct}%</span>
           </div>
@@ -158,10 +158,10 @@ export default function HelpdeskAnalytics() {
     client.get("/tickets/").then(r => { setTickets(r.data); setLoading(false); });
   }, []);
 
-  const resolved  = tickets.filter(t => ["resolved", "closed"].includes(t.status));
-  const active    = tickets.filter(t => !["resolved", "closed"].includes(t.status));
+  const resolved  = tickets.filter(t => isResolvedStatus(t.status));
+  const active    = tickets.filter(t => !isDoneStatus(t.status));
   const p1        = tickets.filter(t => t.priority === "P1");
-  const p1Open    = p1.filter(t => !["resolved", "closed"].includes(t.status));
+  const p1Open    = p1.filter(t => !isDoneStatus(t.status));
   const resRate   = tickets.length ? Math.round((resolved.length / tickets.length) * 100) : 0;
 
   /* Category breakdown */
@@ -187,15 +187,22 @@ export default function HelpdeskAnalytics() {
   const total = tickets.length || 1;
   const donutData = Object.entries(statusMap)
     .sort((a, b) => b[1] - a[1])
-    .map(([label, count]) => ({
-      label, count,
+    .map(([status, count]) => ({
+      status,
+      label: labelStatus(status),
+      count,
       pct: Math.round((count / total) * 100),
-      color: STATUS_COLORS[label] || "#94a3b8",
+      color: STATUS_COLORS[status] || "#94a3b8",
     }));
 
   /* Weekly sparkline — static placeholder; replace with real time-series from API */
   const weekLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const weekData   = [2, 3, 5, 2, 4, 1, 3];
+
+  const openQueue = (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    navigate(`/${query ? `?${query}` : ""}`);
+  };
 
   if (loading) {
     return (
@@ -232,19 +239,19 @@ export default function HelpdeskAnalytics() {
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { icon: BarChart2,    label: "Total assigned",    val: tickets.length,   sub: `${active.length} still active`,      color: "text-indigo-600",  bg: "bg-indigo-50" },
-          { icon: CheckCircle2, label: "Resolved",          val: resolved.length,  sub: `${resRate}% resolution rate`,        color: "text-emerald-600", bg: "bg-emerald-50" },
+          { icon: BarChart2,    label: "Total assigned",    val: tickets.length,   sub: `${active.length} still active`,      color: "text-indigo-600",  bg: "bg-indigo-50", filter: "all" },
+          { icon: CheckCircle2, label: "Resolved",          val: resolved.length,  sub: `${resRate}% resolution rate`,        color: "text-emerald-600", bg: "bg-emerald-50", filter: "resolved" },
           { icon: Clock,        label: "Avg resolve time",  val: "3.2h",           sub: "↓ 18 min vs last week",              color: "text-blue-600",    bg: "bg-blue-50" },
-          { icon: AlertTriangle,label: "P1 open",           val: p1Open.length,    sub: p1Open.length ? "Needs attention" : "All clear", color: p1Open.length ? "text-red-600" : "text-emerald-600", bg: p1Open.length ? "bg-red-50" : "bg-emerald-50" },
-        ].map(({ icon: Icon, label, val, sub, color, bg }) => (
-          <div key={label} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+          { icon: AlertTriangle,label: "P1 open",           val: p1Open.length,    sub: p1Open.length ? "Needs attention" : "All clear", color: p1Open.length ? "text-red-600" : "text-emerald-600", bg: p1Open.length ? "bg-red-50" : "bg-emerald-50", filter: "escalated" },
+        ].map(({ icon: Icon, label, val, sub, color, bg, filter }) => (
+          <button key={label} onClick={() => filter && openQueue({ filter })} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm text-left transition hover:shadow-md hover:border-indigo-200">
             <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center mb-3`}>
               <Icon size={17} className={color} />
             </div>
             <p className="text-xs text-slate-400 mb-1">{label}</p>
             <p className={`text-2xl font-bold ${color}`}>{val}</p>
             <p className="text-xs text-slate-400 mt-1">{sub}</p>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -253,7 +260,7 @@ export default function HelpdeskAnalytics() {
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
           <p className="text-sm font-semibold text-slate-700 mb-4">Status breakdown</p>
           {donutData.length ? (
-            <DonutChart segments={donutData} centerLabel={tickets.length} centerSub="tickets" />
+            <DonutChart segments={donutData} centerLabel={tickets.length} centerSub="tickets" onSegmentClick={(s) => openQueue({ filter: s.status, label: `${s.label.toLowerCase()} tickets` })} />
           ) : (
             <p className="text-sm text-slate-400 text-center py-8">No ticket data</p>
           )}
@@ -277,7 +284,7 @@ export default function HelpdeskAnalytics() {
           {catData.length ? (
             <div className="flex flex-col gap-3">
               {catData.map(d => (
-                <AnimatedBar key={d.label} label={d.label} val={d.val} max={catMax} color={d.color} sublabel="tickets" />
+                <AnimatedBar key={d.label} label={d.label} val={d.val} max={catMax} color={d.color} sublabel="tickets" onClick={() => openQueue({ category: d.label, label: `${d.label} tickets` })} />
               ))}
             </div>
           ) : (
@@ -290,7 +297,7 @@ export default function HelpdeskAnalytics() {
           {priData.length ? (
             <div className="flex flex-col gap-3">
               {priData.map(d => (
-                <AnimatedBar key={d.label} label={d.label} val={d.val} max={priMax} color={d.color} sublabel="tickets" />
+                <AnimatedBar key={d.label} label={d.label} val={d.val} max={priMax} color={d.color} sublabel="tickets" onClick={() => openQueue({ priority: d.label, label: `${d.label} tickets` })} />
               ))}
             </div>
           ) : (

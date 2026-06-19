@@ -117,7 +117,7 @@ class TicketEventOut(BaseModel):
     {
         "action": "assigned",
         "actor_label": "helpdesk: bob",
-        "prev_status": "reviewing",
+        "prev_status": "open",
         "new_status": "assigned",
         "new_assigned": "charlie-engineer-id",
         "notes": "Assigned to Charlie — network issue",

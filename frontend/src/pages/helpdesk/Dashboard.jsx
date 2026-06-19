@@ -1,21 +1,35 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import client from "../../api/client";
+import { CATEGORY_ITEMS } from "../../components/ClassificationLegend";
 import {
   Search, Brain, Check, UserCheck, Clock,
   FileText, AlertTriangle, RefreshCw,
 } from "lucide-react";
+import { labelStatus, isOpenStatus, isAssignedStatus, isDoneStatus, isResolvedStatus } from "../../lib/ui";
+
+const CATEGORY_LABELS = CATEGORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.code]: item.label }), {});
 
 const STATUS_STYLES = {
   open:        "bg-slate-100 text-slate-600",
-  ai_pending:  "bg-amber-50 text-amber-600 border border-amber-200",
-  auto_solved: "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  reviewing:   "bg-blue-50 text-blue-600 border border-blue-200",
   assigned:    "bg-indigo-50 text-indigo-600 border border-indigo-200",
-  in_progress: "bg-indigo-50 text-indigo-600 border border-indigo-200",
-  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  closed:      "bg-slate-100 text-slate-500",
-  reopened:    "bg-red-50 text-red-600 border border-red-200",
   escalated:   "bg-red-50 text-red-600 border border-red-200",
+  auto_solved: "bg-indigo-50 text-indigo-600 border border-indigo-200",
+  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
+};
+const STATUS_ROW_ACCENT = {
+  open:        "hover:border-l-slate-400",
+  assigned:    "hover:border-l-blue-400",
+  escalated:   "hover:border-l-red-500",
+  auto_solved: "hover:border-l-indigo-400",
+  resolved:    "hover:border-l-emerald-500",
+};
+const STATUS_ROW_BG = {
+  open:        "hover:bg-slate-50",
+  assigned:    "hover:bg-blue-50/50",
+  escalated:   "hover:bg-red-50/50",
+  auto_solved: "hover:bg-indigo-50/50",
+  resolved:    "hover:bg-emerald-50/50",
 };
 const PRIORITY_STYLES = {
   P1: "bg-red-50 text-red-600 border border-red-200",
@@ -24,21 +38,20 @@ const PRIORITY_STYLES = {
   P4: "bg-slate-100 text-slate-500",
 };
 
-const RESOLVED_STATUSES = ["resolved", "closed", "auto_solved"];
-
 function Badge({ text, styles }) {
   return (
     <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-500"}`}>
-      {text?.replace("_", " ")}
+      {CATEGORY_LABELS[text] || labelStatus(text)}
     </span>
   );
 }
 
 export default function HelpdeskDashboard() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tickets, setTickets]       = useState([]);
   const [engineers, setEngineers]   = useState([]);
   const [selected, setSelected]     = useState(null);
-  const [filter, setFilter]         = useState("all");
+  const [filter, setFilter]         = useState(searchParams.get("filter") || "all");
   const [search, setSearch]         = useState("");
   const [loading, setLoading]       = useState(true);
   const [engineerId, setEngineerId] = useState("");
@@ -60,6 +73,16 @@ export default function HelpdeskDashboard() {
     }).catch(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    setFilter(searchParams.get("filter") || "all");
+  }, [searchParams]);
+
+  const updateFilter = (key) => {
+    setFilter(key);
+    if (key === "all") setSearchParams({});
+    else setSearchParams({ filter: key });
+  };
+
   const refresh = async () => {
     const r = await client.get("/tickets/");
     setTickets(r.data);
@@ -75,28 +98,42 @@ export default function HelpdeskDashboard() {
   };
 
   const filtered = tickets.filter(t => {
+    const category = searchParams.get("category");
+    const priority = searchParams.get("priority");
     const matchFilter =
       filter === "all"          ? true :
-      filter === "needs_review" ? ["open","ai_pending","reviewing","escalated"].includes(t.status) :
-      filter === "assigned"     ? ["assigned","in_progress"].includes(t.status) :
-      filter === "resolved"     ? RESOLVED_STATUSES.includes(t.status) : true;
+      filter === "open"         ? isOpenStatus(t.status) :
+      filter === "assigned"     ? isAssignedStatus(t.status) :
+      filter === "escalated"    ? t.status === "escalated" :
+      filter === "resolved"     ? isDoneStatus(t.status) : true;
+    const matchCategory = !category || t.category === category;
+    const matchPriority = !priority || t.priority === priority;
     const matchSearch = !search ||
       t.title?.toLowerCase().includes(search.toLowerCase()) ||
       t.id?.toLowerCase().includes(search.toLowerCase());
-    return matchFilter && matchSearch;
+    return matchFilter && matchCategory && matchPriority && matchSearch;
   });
 
   const counts = {
     all:          tickets.length,
-    needs_review: tickets.filter(t => ["open","ai_pending","reviewing","escalated"].includes(t.status)).length,
-    assigned:     tickets.filter(t => ["assigned","in_progress"].includes(t.status)).length,
-    resolved:     tickets.filter(t => RESOLVED_STATUSES.includes(t.status)).length,
+    ai_solved:    tickets.filter(t => t.status === "auto_solved").length,
+    open:         tickets.filter(t => isOpenStatus(t.status)).length,
+    assigned:     tickets.filter(t => isAssignedStatus(t.status)).length,
+    escalated:    tickets.filter(t => t.status === "escalated").length,
+    resolved:     tickets.filter(t => isDoneStatus(t.status)).length,
   };
+  const resolvedByEngineer = tickets.filter(t =>
+    isResolvedStatus(t.status) && t.resolution_path === "engineer"
+  ).length;
+  const resolvedByHelpdesk = tickets.filter(t =>
+    isResolvedStatus(t.status) && t.resolution_path === "helpdesk"
+  ).length;
+  const humanResolvedCount = resolvedByEngineer + resolvedByHelpdesk;
 
   const approve = async () => {
     if (!selected) return;
     try {
-      await client.patch(`/tickets/${selected.id}/review`, { status: "reviewing" });
+      await client.patch(`/tickets/${selected.id}/review`, { status: "open" });
       showMsg("AI card approved");
       await refresh();
     } catch { showMsg("Failed to approve", "error"); }
@@ -134,7 +171,7 @@ export default function HelpdeskDashboard() {
     } finally { setLoadingDigest(false); }
   };
 
-  const isResolved = selected && RESOLVED_STATUSES.includes(selected.status);
+  const isResolved = selected && isDoneStatus(selected.status);
 
   return (
     <div className="w-full">
@@ -181,31 +218,44 @@ export default function HelpdeskDashboard() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-4 mb-6">
         {[
-          { label: "Total Tickets",  value: counts.all,          color: "text-slate-800" },
-          { label: "Needs Review",   value: counts.needs_review,  color: "text-amber-600" },
-          { label: "In Progress",    value: counts.assigned,      color: "text-indigo-600" },
-          { label: "Resolved",       value: counts.resolved,      color: "text-emerald-600" },
-        ].map(s => (
-          <div key={s.label} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-            <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-            <p className="text-xs text-slate-500 mt-1">{s.label}</p>
-          </div>
+          { key: "all", label: "Total Tickets", value: counts.all, sub: "All tickets", color: "text-slate-900", hover: "hover:border-indigo-300 hover:bg-indigo-50/30" },
+          { key: "open", label: "Open", value: counts.open, sub: "Awaiting action", color: "text-amber-600", hover: "hover:border-amber-300 hover:bg-amber-50/30" },
+          { key: "assigned", label: "Assigned", value: counts.assigned, sub: "Engineer working on it", color: "text-blue-600", hover: "hover:border-blue-300 hover:bg-blue-50/30" },
+          { key: "escalated", label: "Escalated", value: counts.escalated, sub: "SLA breached — urgent", color: "text-red-600", hover: "hover:border-red-300 hover:bg-red-50/30" },
+          { key: "resolved", label: "Resolved", value: counts.resolved, sub: `${counts.ai_solved} by AI · ${humanResolvedCount} by human`, color: "text-emerald-600", hover: "hover:border-emerald-300 hover:bg-emerald-50/30" },
+        ].map((s, i) => (
+          <button
+            key={s.label}
+            onClick={() => updateFilter(s.key)}
+            className={`enter bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left transition-all duration-200 hover:scale-[1.03] hover:shadow-lg ${s.hover}`}
+            style={{ animationDelay: `${i * 0.05}s` }}
+          >
+            <p className="text-xs text-slate-500 mb-2">{s.label}</p>
+            <p className={`text-3xl font-bold ${s.color} mb-1`}>{s.value}</p>
+            <p className="text-xs text-slate-400">{s.sub}</p>
+          </button>
         ))}
       </div>
+
+      <style>{`
+        @keyframes slideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        .enter { animation: slideUp 0.4s ease-out backwards; }
+      `}</style>
 
       {/* Filter + Search */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {[
-          { key: "all",          label: "All" },
-          { key: "needs_review", label: "Needs Review" },
-          { key: "assigned",     label: "Assigned" },
-          { key: "resolved",     label: "Resolved" },
+          { key: "all",       label: "All" },
+          { key: "open",      label: "Open" },
+          { key: "assigned",  label: "Assigned" },
+          { key: "escalated", label: "Escalated" },
+          { key: "resolved",  label: "Resolved" },
         ].map(f => (
           <button
             key={f.key}
-            onClick={() => setFilter(f.key)}
+            onClick={() => updateFilter(f.key)}
             className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all border ${
               filter === f.key
                 ? "bg-indigo-600 text-white border-indigo-600"
@@ -248,7 +298,7 @@ export default function HelpdeskDashboard() {
                 <tr
                   key={t.id}
                   onClick={() => { setSelected(t); setEngineerId(""); setResolveText(""); }}
-                  className={`cursor-pointer hover:bg-indigo-50/40 transition-colors ${
+                  className={`cursor-pointer border-l-4 border-l-transparent transition-all duration-200 ${STATUS_ROW_BG[t.status] || "hover:bg-indigo-50/40"} ${STATUS_ROW_ACCENT[t.status] || "hover:border-l-slate-300"} ${
                     selected?.id === t.id ? "bg-indigo-50 border-l-4 border-l-indigo-500" : ""
                   }`}
                 >

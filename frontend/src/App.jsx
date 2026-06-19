@@ -25,6 +25,7 @@ import AdminDashboard from "./pages/admin/Dashboard";
 import AdminAllTickets from "./pages/admin/AllTickets";
 import AdminUserManagement from "./pages/admin/UserManagement";
 import AdminAnalytics from "./pages/admin/Analytics";
+import AdminLearningStats from "./pages/admin/LearningStats";
 
 function RoleDashboard() {
   const { user } = useAuth();
@@ -122,6 +123,11 @@ export default function App() {
             <Route
               path="/admin/analytics"
               element={<AdminAnalytics />}
+            />
+
+            <Route
+              path="/admin/learning"
+              element={<AdminLearningStats />}
             />
 
           </Route>

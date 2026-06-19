@@ -194,7 +194,13 @@ async def poll_once(db) -> int:
 
                         nlp_result = nlp_service.analyze(ticket_input.raw_content)
 
-                        ticket = create_ticket_from_input(db, ticket_input)
+                        ticket = create_ticket_from_input(
+                            db,
+                            ticket_input,
+                            category=nlp_result.category,
+                            priority=nlp_result.priority,
+                            sentiment_score=nlp_result.sentiment_score,
+                        )
 
                         ticket = apply_ai_classification(
                             db, ticket,

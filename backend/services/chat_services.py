@@ -65,7 +65,8 @@ class ChatSession:
     updated_at:   datetime = field(default_factory=datetime.utcnow)
     resolved:     bool = False
     escalated:    bool = False
-
+    awaiting_confirmation: bool = False  
+    
     def add_turn(self, role: str, content: str, confidence: float = 0.0):
         self.turns.append(Turn(
             role=role,

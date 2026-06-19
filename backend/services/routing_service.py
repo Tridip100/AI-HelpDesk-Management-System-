@@ -65,7 +65,7 @@ def find_best_engineer(db: Session, category) -> User:
         Ticket.assigned_to,
         func.count(Ticket.id).label("open_count")
     ).filter(
-        Ticket.status.in_([TicketStatus.assigned, TicketStatus.in_progress]),
+        Ticket.status == TicketStatus.assigned,
         Ticket.assigned_to.isnot(None)
     ).group_by(Ticket.assigned_to).subquery()
 

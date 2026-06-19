@@ -26,9 +26,9 @@ MIN_CLUSTER_SIZE     = 3      # new ticket + at least 2 similar = incident
 SIMILARITY_THRESHOLD = 0.80   # cosine similarity cutoff
 
 ACTIVE_STATUSES = [
-    TicketStatus.open, TicketStatus.ai_pending, TicketStatus.reviewing,
-    TicketStatus.assigned, TicketStatus.in_progress,
-    TicketStatus.escalated, TicketStatus.reopened,
+    TicketStatus.open,
+    TicketStatus.assigned,
+    TicketStatus.escalated,
 ]
 
 

@@ -5,37 +5,35 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   Cell, PieChart, Pie, Sector,
 } from "recharts";
+import { CATEGORY_ITEMS } from "../../components/ClassificationLegend";
+import { labelStatus, isOpenStatus, isAssignedStatus, isDoneStatus, isResolvedStatus } from "../../lib/ui";
 
 const COLORS = ["#4f46e5", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
+const CATEGORY_META = CATEGORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.code]: item }), {});
+const CATEGORY_LABELS = CATEGORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.code]: item.label }), {});
+const CATEGORY_CODES = new Set(CATEGORY_ITEMS.map(item => item.code));
 
 const STATUS_ROW_ACCENT = {
   open:        "hover:border-l-slate-400",
-  ai_pending:  "hover:border-l-amber-400",
   assigned:    "hover:border-l-purple-400",
-  in_progress: "hover:border-l-indigo-400",
-  resolved:    "hover:border-l-emerald-500",
   escalated:   "hover:border-l-red-500",
-  reopened:    "hover:border-l-red-400",
+  auto_solved: "hover:border-l-indigo-400",
+  resolved:    "hover:border-l-emerald-500",
 };
 const STATUS_ROW_BG = {
   open:        "hover:bg-slate-50",
-  ai_pending:  "hover:bg-amber-50/50",
   assigned:    "hover:bg-purple-50/50",
-  in_progress: "hover:bg-indigo-50/50",
-  resolved:    "hover:bg-emerald-50/50",
   escalated:   "hover:bg-red-50/50",
-  reopened:    "hover:bg-red-50/50",
+  auto_solved: "hover:bg-indigo-50/50",
+  resolved:    "hover:bg-emerald-50/50",
 };
 
 const STATUS_STYLES = {
   open:        "bg-slate-100 text-slate-600",
-  ai_pending:  "bg-amber-50 text-amber-600 border border-amber-200",
   assigned:    "bg-purple-50 text-purple-600 border border-purple-200",
-  in_progress: "bg-indigo-50 text-indigo-600 border border-indigo-200",
-  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  closed:      "bg-slate-100 text-slate-500",
   escalated:   "bg-red-50 text-red-600 border border-red-200",
-  reopened:    "bg-red-50 text-red-600 border border-red-200",
+  auto_solved: "bg-indigo-50 text-indigo-600 border border-indigo-200",
+  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
 };
 const PRIORITY_STYLES = {
   P1: "bg-red-50 text-red-600 border border-red-200",
@@ -44,16 +42,23 @@ const PRIORITY_STYLES = {
   P4: "bg-slate-100 text-slate-500",
 };
 
-const OPEN_STATUSES        = ["open", "escalated", "reopened"];
-const IN_PROGRESS_STATUSES = ["assigned", "in_progress"];
-
 function Badge({ text, styles }) {
   return (
     <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-500"}`}>
-      {text?.replace("_", " ")}
+      {CATEGORY_LABELS[text] || labelStatus(text)}
     </span>
   );
 }
+
+const normalizeCategory = (ticket) => {
+  const raw = typeof ticket.category === "object" ? ticket.category?.value : ticket.category;
+  const eventNote = ticket.events
+    ?.map(e => e.notes || "")
+    .find(note => /category:\s*([a-z_]+)/i.test(note));
+  const fromEvent = eventNote?.match(/category:\s*([a-z_]+)/i)?.[1];
+  const category = String(raw || fromEvent || "other").toLowerCase();
+  return CATEGORY_CODES.has(category) ? category : "other";
+};
 
 const renderActiveShape = (props) => {
   const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value } = props;
@@ -133,17 +138,22 @@ export default function AdminDashboard() {
   const [digest, setDigest]             = useState(null);
   const [loadingDigest, setLoadingDigest] = useState(false);
   const [activePieIndex, setActivePieIndex] = useState(0);
+  const [selectedStatusIndex, setSelectedStatusIndex] = useState(null);
+  const [hoveredStatusIndex, setHoveredStatusIndex] = useState(null);
   const [selected, setSelected]         = useState(null);
+  const [learning, setLearning]         = useState(null);
 
   useEffect(() => {
     Promise.all([
       client.get("/admin/metrics"),
       client.get("/admin/stats/summary"),
       client.get("/tickets/"),
-    ]).then(([m, s, t]) => {
+      client.get("/admin/learning-stats").catch(() => ({ data: null })),
+    ]).then(([m, s, t, l]) => {
       setMetrics(m.data);
       setSummary(s.data);
       setTickets(t.data);
+      setLearning(l.data);
     });
   }, []);
 
@@ -156,9 +166,14 @@ export default function AdminDashboard() {
   };
 
   const categoryData = tickets.reduce((acc, t) => {
-    if (!t.category) return acc;
-    const found = acc.find(x => x.name === t.category);
-    if (found) found.count++; else acc.push({ name: t.category, count: 1 });
+    const category = normalizeCategory(t);
+    const found = acc.find(x => x.name === category);
+    if (found) found.count++; else acc.push({
+      name: category,
+      label: CATEGORY_META[category]?.label || category.replace("_", " "),
+      color: CATEGORY_META[category]?.color || COLORS[acc.length % COLORS.length],
+      count: 1,
+    });
     return acc;
   }, []);
 
@@ -168,15 +183,43 @@ export default function AdminDashboard() {
     return acc;
   }, []);
 
-  const openCount       = tickets.filter(t => OPEN_STATUSES.includes(t.status)).length;
-  const inProgressCount = tickets.filter(t => IN_PROGRESS_STATUSES.includes(t.status)).length;
+  const openCount      = tickets.filter(t => isOpenStatus(t.status)).length;
+  const assignedCount  = tickets.filter(t => isAssignedStatus(t.status)).length;
+  const escalatedCount = tickets.filter(t => t.status === "escalated").length;
+  const aiSolvedCount  = tickets.filter(t => t.status === "auto_solved").length;
+  const resolvedCount  = tickets.filter(t => isDoneStatus(t.status)).length;
+
+  const resolvedByEngineer = tickets.filter(t =>
+    isResolvedStatus(t.status) && t.resolution_path === "engineer"
+  ).length;
+  const resolvedByHelpdesk = tickets.filter(t =>
+    isResolvedStatus(t.status) && t.resolution_path === "helpdesk"
+  ).length;
+  const humanResolvedCount = resolvedByEngineer + resolvedByHelpdesk;
 
   const stats = [
-    { label: "Total Tickets",          value: metrics?.total_tickets ?? "—", sub: "All time",            color: "text-slate-900",   hoverBorder: "hover:border-indigo-300", hoverBg: "hover:bg-indigo-50/30",  filter: null },
-    { label: "Open Tickets",           value: openCount,                      sub: "Needs attention",     color: "text-amber-600",   hoverBorder: "hover:border-amber-300",  hoverBg: "hover:bg-amber-50/30",   filter: "open" },
-    { label: "Resolved by AI",         value: metrics?.auto_solved ?? "—",    sub: `${metrics?.auto_solve_rate ?? 0}% of total`, color: "text-indigo-600", hoverBorder: "hover:border-indigo-300", hoverBg: "hover:bg-indigo-50/30", filter: null },
-    { label: "Resolved by Engineers",  value: metrics?.resolved ?? "—",       sub: "Human resolved",      color: "text-emerald-600", hoverBorder: "hover:border-emerald-300",hoverBg: "hover:bg-emerald-50/30", filter: "resolved" },
+    { label: "Total Tickets", value: tickets.length, sub: "All tickets", color: "text-slate-900", filter: "all", hoverBorder: "hover:border-indigo-300", hoverBg: "hover:bg-indigo-50/30" },
+    { label: "Open", value: openCount, sub: "Awaiting action", color: "text-amber-600", filter: "open", hoverBorder: "hover:border-amber-300", hoverBg: "hover:bg-amber-50/30" },
+    { label: "Assigned", value: assignedCount, sub: "Engineer working on it", color: "text-blue-600", filter: "assigned", hoverBorder: "hover:border-blue-300", hoverBg: "hover:bg-blue-50/30" },
+    { label: "Escalated", value: escalatedCount, sub: "SLA breached — urgent", color: "text-red-600", filter: "escalated", hoverBorder: "hover:border-red-300", hoverBg: "hover:bg-red-50/30" },
+    {
+      label: "Resolved",
+      value: resolvedCount,
+      sub: `${aiSolvedCount} by AI · ${humanResolvedCount} by human`,
+      color: "text-emerald-600",
+      filter: "resolved",
+      hoverBorder: "hover:border-emerald-300",
+      hoverBg: "hover:bg-emerald-50/30",
+    },
   ];
+
+  const openTickets = (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    navigate(`/admin/tickets${query ? `?${query}` : ""}`);
+  };
+
+  const visibleStatusData = selectedStatusIndex === null ? statusData : [statusData[selectedStatusIndex]];
+  const statusOpacity = (index) => hoveredStatusIndex === null || hoveredStatusIndex === index ? 1 : 0.22;
 
   return (
     <>
@@ -211,21 +254,19 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Stat cards — zoom + coloured border glow, clickable */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
+        {/* Stat cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-4 mb-8">
           {stats.map((s, i) => (
             <button
               key={s.label}
-              onClick={() => s.filter && navigate(`/admin/tickets?filter=${s.filter}`)}
-              className={`enter bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-left
-                          transition-all duration-200 hover:scale-[1.03] hover:shadow-lg
-                          ${s.hoverBorder} ${s.hoverBg} group`}
-              style={{ animationDelay: `${i * 0.05}s`, cursor: s.filter ? "pointer" : "default" }}
+              onClick={() => openTickets({ filter: s.filter, label: s.label.toLowerCase() })}
+              className={`enter bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left transition-all duration-200 hover:scale-[1.03] hover:shadow-lg ${s.hoverBorder} ${s.hoverBg} group`}
+              style={{ animationDelay: `${i * 0.05}s` }}
             >
-              <p className="text-sm text-slate-500 mb-2">{s.label}</p>
-              <p className={`text-4xl font-bold mb-2 ${s.color}`}>{s.value}</p>
-              <p className="text-sm text-slate-500">{s.sub}</p>
-              {s.filter && <p className="text-xs text-slate-400 mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">View tickets →</p>}
+              <p className="text-xs text-slate-500 mb-2">{s.label}</p>
+              <p className={`text-3xl font-bold ${s.color} mb-1`}>{s.value}</p>
+              <p className="text-xs text-slate-400">{s.sub}</p>
+              <p className="text-xs text-slate-400 mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">View tickets →</p>
             </button>
           ))}
         </div>
@@ -239,17 +280,18 @@ export default function AdminDashboard() {
               <p className="text-center text-slate-500 py-12">No data available</p>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={categoryData}>
-                  <XAxis dataKey="name" tick={{ fill: "#475569", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <BarChart data={categoryData}>
+                  <XAxis dataKey="label" tick={{ fill: "#475569", fontSize: 12 }} axisLine={false} tickLine={false} />
                   <YAxis allowDecimals={false} tick={{ fill: "#475569", fontSize: 12 }} axisLine={false} tickLine={false} />
                   <Tooltip
                     cursor={{ fill: "rgba(99,102,241,0.08)", radius: 8 }}
-                    formatter={(value, _key, props) => [`${value} Tickets`, props.payload.name]}
+                    formatter={(value, _key, props) => [`${value} Tickets`, props.payload.label]}
                     contentStyle={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: "12px", boxShadow: "0 10px 25px rgba(0,0,0,0.1)", color: "#0f172a" }}
                     labelStyle={{ display: "none" }}
                   />
-                  <Bar dataKey="count" radius={[8, 8, 0, 0]} activeBar={{ stroke: "#4338ca", strokeWidth: 2 }}>
-                    {categoryData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  <Bar dataKey="count" radius={[8, 8, 0, 0]} activeBar={{ stroke: "#4338ca", strokeWidth: 2 }} cursor="pointer"
+                    onClick={(point) => openTickets({ category: point.name, label: `${point.name} tickets` })}>
+                    {categoryData.map((c) => <Cell key={c.name} fill={c.color} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -265,25 +307,42 @@ export default function AdminDashboard() {
               <>
                 <ResponsiveContainer width="100%" height={220}>
                   <PieChart>
-                    <Pie data={statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={85}
+                    <Pie data={visibleStatusData} cx="50%" cy="50%" innerRadius={55} outerRadius={85}
                       dataKey="value" paddingAngle={3}
                       activeIndex={activePieIndex} activeShape={renderActiveShape}
-                      onMouseEnter={(_, index) => setActivePieIndex(index)}
+                      onMouseEnter={(_, index) => { setActivePieIndex(index); setHoveredStatusIndex(selectedStatusIndex ?? index); }}
+                      onMouseLeave={() => setHoveredStatusIndex(null)}
+                      onClick={(_, index) => {
+                        const status = visibleStatusData[index]?.name;
+                        if (status) openTickets({ filter: status, label: `${labelStatus(status).toLowerCase()} tickets` });
+                      }}
                     >
-                      {statusData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                      {visibleStatusData.map((_, i) => {
+                        const originalIndex = selectedStatusIndex ?? i;
+                        return (
+                          <Cell
+                            key={i}
+                            fill={COLORS[originalIndex % COLORS.length]}
+                            fillOpacity={statusOpacity(originalIndex)}
+                            strokeOpacity={statusOpacity(originalIndex)}
+                          />
+                        );
+                      })}
                     </Pie>
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-2 mt-4">
                   {statusData.map((s, i) => (
-                    <div key={s.name} className="flex items-center justify-between text-sm cursor-pointer hover:bg-slate-50 rounded-lg px-2 py-1 transition-colors"
-                      onMouseEnter={() => setActivePieIndex(i)}>
+                    <button key={s.name} className={`w-full flex items-center justify-between text-sm cursor-pointer rounded-lg px-2 py-1 transition-colors ${selectedStatusIndex === i ? "bg-indigo-50" : "hover:bg-slate-50"}`}
+                      onMouseEnter={() => { setActivePieIndex(i); setHoveredStatusIndex(i); }}
+                      onMouseLeave={() => setHoveredStatusIndex(null)}
+                      onClick={() => openTickets({ filter: s.name, label: `${labelStatus(s.name).toLowerCase()} tickets` })}>
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full" style={{ background: COLORS[i % COLORS.length] }} />
-                        <span className="text-slate-600 capitalize">{s.name.replace("_", " ")}</span>
+                        <span className="text-slate-600">{labelStatus(s.name)}</span>
                       </div>
                       <span className="font-semibold text-slate-900">{s.value}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </>
@@ -338,7 +397,8 @@ export default function AdminDashboard() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
               {metrics.engineer_breakdown.map(e => (
-                <div key={e.username}
+                <button key={e.id || e.username}
+                  onClick={() => navigate(`/admin/users?role=engineer&user=${encodeURIComponent(e.id || e.username)}`)}
                   className="bg-slate-50 border border-slate-200 rounded-2xl p-5 transition-all duration-200 hover:scale-[1.02] hover:shadow-md hover:border-indigo-200 hover:bg-indigo-50/20">
                   <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 font-semibold flex items-center justify-center mb-4">
                     {e.full_name?.split(" ").map(n => n[0]).join("") || e.username[0].toUpperCase()}
@@ -346,8 +406,50 @@ export default function AdminDashboard() {
                   <h4 className="font-semibold text-slate-900">{e.full_name || e.username}</h4>
                   <p className="text-3xl font-bold text-indigo-600 my-2">{e.assigned}</p>
                   <p className="text-sm text-slate-500">Tickets Assigned{e.avg_csat ? ` • ${e.avg_csat} CSAT` : ""}</p>
-                </div>
+                </button>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* Continuous Learning */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mt-6 hover:shadow-md transition-all">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-lg font-semibold text-slate-900">Continuous Learning</h3>
+            <button
+              onClick={() => navigate("/admin/learning")}
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+            >
+              View details →
+            </button>
+          </div>
+          <p className="text-sm text-slate-500 mb-5">System knowledge grows automatically — no model retraining needed</p>
+
+          {!learning ? (
+            <p className="text-sm text-slate-400">Loading...</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-4">
+              <button
+                onClick={() => navigate("/admin/learning?tab=cache")}
+                className="bg-indigo-50 rounded-xl p-4 text-left transition-all hover:scale-[1.02] hover:shadow-sm hover:bg-indigo-100/70"
+              >
+                <p className="text-2xl font-bold text-indigo-600">{learning.solution_cache_size}</p>
+                <p className="text-xs text-slate-500 mt-1">Cached Solutions</p>
+              </button>
+              <button
+                onClick={() => navigate("/admin/learning?tab=conversations")}
+                className="bg-emerald-50 rounded-xl p-4 text-left transition-all hover:scale-[1.02] hover:shadow-sm hover:bg-emerald-100/70"
+              >
+                <p className="text-2xl font-bold text-emerald-600">{learning.resolved_tickets_size}</p>
+                <p className="text-xs text-slate-500 mt-1">Resolved Conversations</p>
+              </button>
+              <button
+                onClick={() => navigate("/admin/learning?tab=knowledge")}
+                className="bg-blue-50 rounded-xl p-4 text-left transition-all hover:scale-[1.02] hover:shadow-sm hover:bg-blue-100/70"
+              >
+                <p className="text-2xl font-bold text-blue-600">{learning.sop_chunks_size}</p>
+                <p className="text-xs text-slate-500 mt-1">Knowledge Base Docs</p>
+              </button>
             </div>
           )}
         </div>

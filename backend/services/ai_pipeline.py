@@ -93,7 +93,7 @@ async def run_streaming(
 
     # ── Greeting ─────────────────────────────────────────────
     if intent == "greeting":
-        yield {"type": "status", "stage": "analyzing", "label": "Thinking..."}
+        yield {"type": "status", "stage": "analyzing", "label": "Reading your message..."}
         yield {
             "type":                "result",
             "tier":                "tier1",
@@ -106,7 +106,7 @@ async def run_streaming(
 
     # ── Escalation intent ────────────────────────────────────
     if intent == "escalate":
-        yield {"type": "status", "stage": "analyzing", "label": "Processing your request..."}
+        yield {"type": "status", "stage": "creating_ticket", "label": "Creating support ticket..."}
         yield {
             "type":                "result",
             "tier":                "tier1",
@@ -131,12 +131,12 @@ async def run_streaming(
             logger.info(f"[PIPELINE] Follow-up enriched with original context")
 
     # ── Solution cache check ──────────────────────────────────
-    yield {"type": "status", "stage": "knowledge_base", "label": "Checking knowledge base..."}
+    yield {"type": "status", "stage": "cache_check", "label": "Checking previous solutions..."}
 
     cache_hit = get_cached_solution(effective_message)
     if cache_hit:
         logger.info(f"[PIPELINE] Cache hit — skipping NLP/RAG/LLM")
-        yield {"type": "status", "stage": "thinking", "label": "Found previous solution!"}
+        yield {"type": "status", "stage": "thinking", "label": "Generating your answer..."}
 
         nlp_result = nlp_service.analyze(effective_message[:300])
 
@@ -152,7 +152,7 @@ async def run_streaming(
         return
 
     # ── Full pipeline ─────────────────────────────────────────
-    yield {"type": "status", "stage": "analyzing", "label": "Analyzing your message..."}
+    yield {"type": "status", "stage": "analyzing", "label": "Reading your message..."}
 
     nlp_result = nlp_service.analyze(effective_message[:500])
 
@@ -164,7 +164,7 @@ async def run_streaming(
     yield {
         "type":  "status",
         "stage": "knowledge_base",
-        "label": "Searching knowledge base...",
+        "label": "Searching IT knowledge base...",
     }
 
     nlp_summary = (
@@ -174,7 +174,7 @@ async def run_streaming(
 
     # Tier 1 / Tier 3a — simple, answer directly
     if nlp_result.tier in ("tier1", "tier3a"):
-        yield {"type": "status", "stage": "thinking", "label": "Generating answer..."}
+        yield {"type": "status", "stage": "thinking", "label": "Generating your answer..."}
 
         result = await llm_service.generate(
             nlp_summary  = nlp_summary,
@@ -217,7 +217,7 @@ async def run_streaming(
         except Exception as e:
             logger.warning(f"[PIPELINE] Tavily failed: {e}")
 
-    yield {"type": "status", "stage": "thinking", "label": "Generating answer..."}
+    yield {"type": "status", "stage": "thinking", "label": "Generating your answer..."}
 
     # Single LLM call — qwen2.5 handles everything
     full_response = ""

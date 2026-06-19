@@ -1,18 +1,31 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import client from "../../api/client";
+import { CATEGORY_ITEMS } from "../../components/ClassificationLegend";
+import { labelStatus, isOpenStatus, isAssignedStatus, isDoneStatus, isAutoSolvedStatus } from "../../lib/ui";
+
+const CATEGORY_LABELS = CATEGORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.code]: item.label }), {});
 
 const STATUS_STYLES = {
   open:        "bg-slate-100 text-slate-600",
-  ai_pending:  "bg-amber-50 text-amber-600 border border-amber-200",
-  auto_solved: "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  reviewing:   "bg-blue-50 text-blue-600 border border-blue-200",
   assigned:    "bg-purple-50 text-purple-600 border border-purple-200",
-  in_progress: "bg-indigo-50 text-indigo-600 border border-indigo-200",
-  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
-  closed:      "bg-slate-100 text-slate-500",
-  reopened:    "bg-red-50 text-red-600 border border-red-200",
   escalated:   "bg-red-50 text-red-600 border border-red-200",
+  auto_solved: "bg-indigo-50 text-indigo-600 border border-indigo-200",
+  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
+};
+const STATUS_ROW_ACCENT = {
+  open:        "hover:border-l-slate-400",
+  assigned:    "hover:border-l-blue-400",
+  escalated:   "hover:border-l-red-500",
+  auto_solved: "hover:border-l-indigo-400",
+  resolved:    "hover:border-l-emerald-500",
+};
+const STATUS_ROW_BG = {
+  open:        "hover:bg-slate-50",
+  assigned:    "hover:bg-blue-50/50",
+  escalated:   "hover:bg-red-50/50",
+  auto_solved: "hover:bg-indigo-50/50",
+  resolved:    "hover:bg-emerald-50/50",
 };
 
 const PRIORITY_STYLES = {
@@ -25,7 +38,7 @@ const PRIORITY_STYLES = {
 function Badge({ text, styles }) {
   return (
     <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-500"}`}>
-      {text?.replace("_", " ")}
+      {CATEGORY_LABELS[text] || labelStatus(text)}
     </span>
   );
 }
@@ -132,9 +145,11 @@ export default function UserDashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const openTickets     = tickets.filter(t => ["open", "escalated", "reopened"].includes(t.status));
-  const resolvedTickets = tickets.filter(t => t.status === "resolved");
-  const pendingTickets  = tickets.filter(t => t.status === "ai_pending");
+  const openTickets     = tickets.filter(t => isOpenStatus(t.status));
+  const assignedTickets = tickets.filter(t => isAssignedStatus(t.status));
+  const escalatedTickets= tickets.filter(t => t.status === "escalated");
+  const aiSolvedTickets = tickets.filter(t => isAutoSolvedStatus(t.status));
+  const resolvedTickets = tickets.filter(t => isDoneStatus(t.status));
 
   // Navigate to TicketsView with a pre-applied filter
   const goToFilter = (filter) => navigate(`/user/tickets?filter=${filter}`);
@@ -151,7 +166,7 @@ export default function UserDashboard() {
         </div>
 
         {/* Stats — clickable, navigate with filter */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-5 mb-8">
           <button
             onClick={() => navigate("/user/tickets")}
             className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left hover:border-slate-300 hover:shadow-md transition-all group"
@@ -175,14 +190,36 @@ export default function UserDashboard() {
           </button>
 
           <button
-            onClick={() => goToFilter("ai_pending")}
+            onClick={() => goToFilter("assigned")}
+            className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left hover:border-blue-200 hover:shadow-md transition-all group"
+          >
+            <p className="text-sm text-slate-500">Assigned</p>
+            <p className="text-3xl font-bold text-blue-600 mt-2">
+              {assignedTickets.length}
+            </p>
+            <p className="text-xs text-slate-400 mt-1 group-hover:text-blue-500 transition-colors">Engineer working →</p>
+          </button>
+
+          <button
+            onClick={() => goToFilter("auto_solved")}
             className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left hover:border-indigo-200 hover:shadow-md transition-all group"
           >
-            <p className="text-sm text-slate-500">Pending AI Review</p>
+            <p className="text-sm text-slate-500">AI Solved</p>
             <p className="text-3xl font-bold text-indigo-600 mt-2">
-              {pendingTickets.length}
+              {aiSolvedTickets.length}
             </p>
-            <p className="text-xs text-slate-400 mt-1 group-hover:text-indigo-500 transition-colors">View pending →</p>
+            <p className="text-xs text-slate-400 mt-1 group-hover:text-indigo-500 transition-colors">View AI solved →</p>
+          </button>
+
+          <button
+            onClick={() => goToFilter("escalated")}
+            className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left hover:border-red-200 hover:shadow-md transition-all group"
+          >
+            <p className="text-sm text-slate-500">Escalated</p>
+            <p className="text-3xl font-bold text-red-600 mt-2">
+              {escalatedTickets.length}
+            </p>
+            <p className="text-xs text-slate-400 mt-1 group-hover:text-red-500 transition-colors">Urgent review →</p>
           </button>
 
           <button
@@ -193,7 +230,7 @@ export default function UserDashboard() {
             <p className="text-3xl font-bold text-emerald-600 mt-2">
               {resolvedTickets.length}
             </p>
-            <p className="text-xs text-slate-400 mt-1 group-hover:text-emerald-500 transition-colors">View resolved →</p>
+            <p className="text-xs text-slate-400 mt-1 group-hover:text-emerald-500 transition-colors">{aiSolvedTickets.length} by AI · {resolvedTickets.length - aiSolvedTickets.length} by human →</p>
           </button>
         </div>
 
@@ -230,7 +267,7 @@ export default function UserDashboard() {
                     <tr
                       key={ticket.id}
                       onClick={() => setSelected(ticket)}
-                      className="border-b border-slate-100 hover:bg-indigo-50/40 transition cursor-pointer group"
+                      className={`border-b border-l-4 border-l-transparent border-slate-100 transition cursor-pointer group ${STATUS_ROW_BG[ticket.status] || "hover:bg-indigo-50/40"} ${STATUS_ROW_ACCENT[ticket.status] || "hover:border-l-slate-300"}`}
                     >
                       <td className="px-5 py-4 text-slate-900 text-sm group-hover:text-indigo-700 transition-colors font-medium">
                         {ticket.title}

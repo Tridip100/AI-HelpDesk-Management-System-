@@ -58,10 +58,8 @@ def collect_digest_data(db: Session, hours: int = 8) -> dict:
     # Auto-resolved by AI
     ai_resolved = sum(1 for t in tickets if t.status == TicketStatus.auto_solved)
 
-    # Pending helpdesk review
-    pending = sum(1 for t in tickets if t.status in [
-        TicketStatus.open, TicketStatus.ai_pending, TicketStatus.reviewing
-    ])
+    # New or unassigned tickets
+    pending = sum(1 for t in tickets if t.status == TicketStatus.open)
 
     # SLA breaches in window
     sla_breaches = db.query(TicketEvent).filter(
@@ -83,7 +81,7 @@ def collect_digest_data(db: Session, hours: int = 8) -> dict:
     # Active incidents
     incidents = db.query(Ticket).filter(
         Ticket.is_incident == True,
-        Ticket.status.notin_([TicketStatus.resolved, TicketStatus.closed]),
+        Ticket.status != TicketStatus.resolved,
     ).all()
 
     incident_details = [{

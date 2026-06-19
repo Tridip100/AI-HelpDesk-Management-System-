@@ -1,15 +1,17 @@
 export const STATUS_LABELS = {
   open: "Open",
-  ai_pending: "AI Pending",
-  auto_solved: "Resolved",
-  reviewing: "Reviewing",
   assigned: "Assigned",
   escalated: "Escalated",
-  in_progress: "In Progress",
+  auto_solved: "AI Solved",
   resolved: "Resolved",
-  closed: "Closed",
-  reopened: "Reopened",
 };
+
+export const OPEN_STATUSES = ["open"];
+export const ASSIGNED_STATUSES = ["assigned"];
+export const ESCALATED_STATUSES = ["escalated"];
+export const AUTO_SOLVED_STATUSES = ["auto_solved"];
+export const RESOLVED_STATUSES = ["resolved"];
+export const ACTIVE_STATUSES = [...OPEN_STATUSES, ...ASSIGNED_STATUSES, ...ESCALATED_STATUSES];
 
 export const PRIORITY_LABELS = {
   P1: "Critical",
@@ -32,15 +34,10 @@ export const CATEGORY_LABELS = {
 
 export const statusClass = {
   open: "bg-blue-100 text-blue-700",
-  ai_pending: "bg-yellow-100 text-yellow-700",
-  auto_solved: "bg-emerald-100 text-emerald-700",
-  reviewing: "bg-sky-100 text-sky-700",
   assigned: "bg-purple-100 text-purple-700",
   escalated: "bg-red-100 text-red-700",
-  in_progress: "bg-yellow-100 text-yellow-700",
+  auto_solved: "bg-indigo-100 text-indigo-700",
   resolved: "bg-emerald-100 text-emerald-700",
-  closed: "bg-slate-100 text-slate-600",
-  reopened: "bg-orange-100 text-orange-700",
 };
 
 export const priorityClass = {
@@ -63,6 +60,30 @@ export function cx(...parts) {
 
 export function labelStatus(status) {
   return STATUS_LABELS[status] || titleCase(status);
+}
+
+export function isOpenStatus(status) {
+  return OPEN_STATUSES.includes(status);
+}
+
+export function isAssignedStatus(status) {
+  return ASSIGNED_STATUSES.includes(status);
+}
+
+export function isEscalatedStatus(status) {
+  return ESCALATED_STATUSES.includes(status);
+}
+
+export function isAutoSolvedStatus(status) {
+  return AUTO_SOLVED_STATUSES.includes(status);
+}
+
+export function isResolvedStatus(status) {
+  return RESOLVED_STATUSES.includes(status);
+}
+
+export function isDoneStatus(status) {
+  return isAutoSolvedStatus(status) || isResolvedStatus(status);
 }
 
 export function labelPriority(priority) {
@@ -135,7 +156,7 @@ export const sampleTickets = [
     channel: "chat",
     category: "network",
     priority: "P2",
-    status: "in_progress",
+    status: "assigned",
     created_by: "Rahul Verma",
     assigned_to: "Vikram Singh",
     created_at: "2026-06-13T09:30:00",
@@ -183,7 +204,7 @@ export const sampleTickets = [
     channel: "web",
     category: "software",
     priority: "P1",
-    status: "closed",
+    status: "resolved",
     created_by: "Ananya Gupta",
     assigned_to: "Deepa Krishnan",
     created_at: "2026-06-05T14:10:00",
@@ -195,7 +216,7 @@ export const sampleTickets = [
     channel: "chat",
     category: "network",
     priority: "P3",
-    status: "in_progress",
+    status: "assigned",
     created_by: "Priya Sharma",
     assigned_to: "Vikram Singh",
     created_at: "2026-06-12T16:20:00",
@@ -207,7 +228,7 @@ export const sampleTickets = [
     channel: "web",
     category: "auth",
     priority: "P2",
-    status: "reopened",
+    status: "open",
     created_by: "Rahul Verma",
     assigned_to: "Deepa Krishnan",
     created_at: "2026-06-11T11:10:00",

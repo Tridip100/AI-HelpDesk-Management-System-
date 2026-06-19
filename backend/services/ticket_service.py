@@ -72,7 +72,7 @@ def create_ticket(
         description=description,
         channel=channel,
         created_by=created_by.id,
-        status=TicketStatus.ai_pending,
+        status=TicketStatus.open,
         sla_deadline=datetime.utcnow() + timedelta(hours=SLA_HOURS[TicketPriority.P3]),
     )
     db.add(ticket)
@@ -82,7 +82,7 @@ def create_ticket(
         db, ticket.id,
         action=EventAction.created,
         actor=created_by,
-        new_status=TicketStatus.ai_pending.value,     # ← .value fix
+        new_status=TicketStatus.open.value,
         notes=f"Ticket submitted via {channel}"
     )
     db.commit()
@@ -96,6 +96,9 @@ def create_ticket(
 def create_ticket_from_input(
     db: Session,
     ticket_input: TicketInput,
+    category: str = None,
+    priority: str = None,
+    sentiment_score: float = None,
 ) -> Ticket:
     """
     Create a ticket from a normalized TicketInput object.
@@ -113,13 +116,22 @@ def create_ticket_from_input(
         raise ValueError(f"User {ticket_input.user_id} not found in DB")
 
     ticket = Ticket(
-        title=ticket_input.subject,
-        description=ticket_input.raw_content,
-        channel=ticket_input.source,           # "email" | "chat" | "call"
-        created_by=user.id,
-        status=TicketStatus.ai_pending,
-        sla_deadline=datetime.utcnow() + timedelta(hours=SLA_HOURS[TicketPriority.P3]),
-        intake_id=ticket_input.intake_id,      # traceability back to channel intake
+    title=ticket_input.subject,
+    description=ticket_input.raw_content,
+    channel=ticket_input.source,
+    created_by=user.id,
+
+    category=TicketCategory(category) if category else None,
+    priority=TicketPriority(priority) if priority else TicketPriority.P3,
+
+    sentiment_score=sentiment_score,
+
+    status=TicketStatus.open,
+    sla_deadline=datetime.utcnow() + timedelta(
+        hours=SLA_HOURS[TicketPriority.P3]
+        ),
+
+    intake_id=ticket_input.intake_id,
     )
     db.add(ticket)
     db.flush()
@@ -128,7 +140,7 @@ def create_ticket_from_input(
         db, ticket.id,
         action=EventAction.created,
         actor=user,
-        new_status=TicketStatus.ai_pending.value,
+        new_status=TicketStatus.open.value,
         notes=(
             f"Ticket received via {ticket_input.source} channel. "
             f"intake_id={ticket_input.intake_id}"
@@ -168,7 +180,7 @@ def apply_ai_classification(
     if resolution_path == ResolutionPath.auto_solve:
         ticket.status = TicketStatus.auto_solved
     else:
-        ticket.status = TicketStatus.reviewing
+        ticket.status = TicketStatus.open
 
     log_event(
         db, ticket.id,
@@ -300,7 +312,7 @@ def reopen_ticket(
     """
     prev_status = ticket.status.value if ticket.status else None
 
-    ticket.status      = TicketStatus.reviewing
+    ticket.status      = TicketStatus.open
     ticket.resolved_at = None
 
     log_event(
@@ -308,7 +320,7 @@ def reopen_ticket(
         action=EventAction.reopened,
         actor=reopened_by,
         prev_status=prev_status,
-        new_status=TicketStatus.reviewing.value,
+        new_status=TicketStatus.open.value,
         notes=f"Ticket reopened. Reason: {reason}"
     )
     db.commit()
@@ -331,14 +343,14 @@ def close_ticket(
     """
     prev_status = ticket.status.value if ticket.status else None
 
-    ticket.status = TicketStatus.closed
+    ticket.status = TicketStatus.resolved
 
     log_event(
         db, ticket.id,
         action=EventAction.closed,
         actor=closed_by,
         prev_status=prev_status,
-        new_status=TicketStatus.closed.value,
+        new_status=TicketStatus.resolved.value,
         notes=notes or "Ticket closed by user confirmation"
     )
     db.commit()
