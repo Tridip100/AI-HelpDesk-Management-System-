@@ -10,11 +10,11 @@ import { labelStatus, isOpenStatus, isAssignedStatus, isDoneStatus, isResolvedSt
 const CATEGORY_LABELS = CATEGORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.code]: item.label }), {});
 
 const STATUS_STYLES = {
-  open:        "bg-slate-100 text-slate-600",
-  assigned:    "bg-indigo-50 text-indigo-600 border border-indigo-200",
-  escalated:   "bg-red-50 text-red-600 border border-red-200",
-  auto_solved: "bg-indigo-50 text-indigo-600 border border-indigo-200",
-  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200",
+  open:        "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
+  assigned:    "bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800",
+  escalated:   "bg-red-50 text-red-600 border border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800",
+  auto_solved: "bg-indigo-50 text-indigo-600 border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800",
+  resolved:    "bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800",
 };
 const STATUS_ROW_ACCENT = {
   open:        "hover:border-l-slate-400",
@@ -24,21 +24,21 @@ const STATUS_ROW_ACCENT = {
   resolved:    "hover:border-l-emerald-500",
 };
 const STATUS_ROW_BG = {
-  open:        "hover:bg-slate-50",
-  assigned:    "hover:bg-blue-50/50",
-  escalated:   "hover:bg-red-50/50",
-  auto_solved: "hover:bg-indigo-50/50",
-  resolved:    "hover:bg-emerald-50/50",
+  open:        "hover:bg-slate-50 dark:hover:bg-slate-800/60",
+  assigned:    "hover:bg-blue-50/50 dark:hover:bg-blue-900/10",
+  escalated:   "hover:bg-red-50/50 dark:hover:bg-red-900/10",
+  auto_solved: "hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10",
+  resolved:    "hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10",
 };
 const PRIORITY_STYLES = {
-  P1: "bg-red-50 text-red-600 border border-red-200",
-  P2: "bg-orange-50 text-orange-600 border border-orange-200",
-  P3: "bg-blue-50 text-blue-600 border border-blue-200",
-  P4: "bg-slate-100 text-slate-500",
+  P1: "bg-red-50 text-red-600 border border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800",
+  P2: "bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800",
+  P3: "bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800",
+  P4: "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400",
 };
 function Badge({ text, styles }) {
   return (
-    <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-500"}`}>
+    <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${styles?.[text] || "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400"}`}>
       {CATEGORY_LABELS[text] || labelStatus(text)}
     </span>
   );
@@ -48,7 +48,7 @@ function TypingDots() {
   return (
     <span className="flex gap-1 items-center h-4">
       {[0, 1, 2].map(i => (
-        <span key={i} className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce"
+        <span key={i} className="w-1.5 h-1.5 bg-slate-300 dark:bg-slate-500 rounded-full animate-bounce"
           style={{ animationDelay: `${i * 0.15}s` }} />
       ))}
     </span>
@@ -113,7 +113,6 @@ export default function EngineerDashboard() {
     setMessages([{ role: "assistant", content: lines.join("\n"), isContext: true }]);
   };
 
-  // Build ticket context string for engineer_mode
   const getTicketContext = () => {
     if (!selected) return null;
     return [
@@ -144,8 +143,8 @@ export default function EngineerDashboard() {
         body: JSON.stringify({
           message:        text,
           session_id:     sessionId,
-          engineer_mode:  true,           // ← engineer mode on
-          ticket_context: getTicketContext(), // ← ticket context for LLM
+          engineer_mode:  true,
+          ticket_context: getTicketContext(),
         }),
       });
 
@@ -244,25 +243,24 @@ export default function EngineerDashboard() {
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 140px)" }}>
 
-      {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-shrink-0">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">My Assignments</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">My Assignments</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
             {active.length} active · {done.length} resolved
           </p>
         </div>
         <div className="flex items-center gap-3">
           {msg.text && (
             <span className={`text-xs font-medium px-3 py-1.5 rounded-full ${
-              msg.type === "error" ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"
+              msg.type === "error" ? "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400" : "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
             }`}>
               {msg.text}
             </span>
           )}
           <button
             onClick={() => client.get("/tickets/").then(r => setTickets(r.data))}
-            className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-500"
+            className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
             title="Refresh"
           >
             <RefreshCw size={16} />
@@ -277,21 +275,21 @@ export default function EngineerDashboard() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-4 mb-5 flex-shrink-0">
         {[
-          { key: "all", label: "Total Tickets", value: counts.all, sub: "All tickets", color: "text-slate-900", hover: "hover:border-indigo-300 hover:bg-indigo-50/30" },
-          { key: "open", label: "Open", value: counts.open, sub: "Awaiting action", color: "text-amber-600", hover: "hover:border-amber-300 hover:bg-amber-50/30" },
-          { key: "assigned", label: "Assigned", value: counts.assigned, sub: "Engineer working on it", color: "text-blue-600", hover: "hover:border-blue-300 hover:bg-blue-50/30" },
-          { key: "escalated", label: "Escalated", value: counts.escalated, sub: "SLA breached - urgent", color: "text-red-600", hover: "hover:border-red-300 hover:bg-red-50/30" },
-          { key: "resolved", label: "Resolved", value: counts.resolved, sub: `${counts.ai_solved} by AI · ${humanResolvedCount} by human`, color: "text-emerald-600", hover: "hover:border-emerald-300 hover:bg-emerald-50/30" },
+          { key: "all", label: "Total Tickets", value: counts.all, sub: "All tickets", color: "text-slate-900 dark:text-slate-100", hover: "hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10" },
+          { key: "open", label: "Open", value: counts.open, sub: "Awaiting action", color: "text-amber-600 dark:text-amber-400", hover: "hover:border-amber-300 dark:hover:border-amber-600 hover:bg-amber-50/30 dark:hover:bg-amber-900/10" },
+          { key: "assigned", label: "Assigned", value: counts.assigned, sub: "Engineer working on it", color: "text-blue-600 dark:text-blue-400", hover: "hover:border-blue-300 dark:hover:border-blue-600 hover:bg-blue-50/30 dark:hover:bg-blue-900/10" },
+          { key: "escalated", label: "Escalated", value: counts.escalated, sub: "SLA breached - urgent", color: "text-red-600 dark:text-red-400", hover: "hover:border-red-300 dark:hover:border-red-600 hover:bg-red-50/30 dark:hover:bg-red-900/10" },
+          { key: "resolved", label: "Resolved", value: counts.resolved, sub: `${counts.ai_solved} by AI · ${humanResolvedCount} by human`, color: "text-emerald-600 dark:text-emerald-400", hover: "hover:border-emerald-300 dark:hover:border-emerald-600 hover:bg-emerald-50/30 dark:hover:bg-emerald-900/10" },
         ].map((s, i) => (
           <button
             key={s.label}
             onClick={() => setFilter(s.key)}
-            className={`enter bg-white border border-slate-200 rounded-2xl p-4 shadow-sm text-left transition-all duration-200 hover:scale-[1.03] hover:shadow-lg ${s.hover}`}
+            className={`enter bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm text-left transition-all duration-200 hover:scale-[1.03] hover:shadow-lg ${s.hover}`}
             style={{ animationDelay: `${i * 0.05}s` }}
           >
-            <p className="text-xs text-slate-500 mb-1.5">{s.label}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">{s.label}</p>
             <p className={`text-2xl font-bold ${s.color} mb-1`}>{s.value}</p>
-            <p className="text-[11px] text-slate-400">{s.sub}</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">{s.sub}</p>
           </button>
         ))}
       </div>
@@ -310,7 +308,7 @@ export default function EngineerDashboard() {
             className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all border ${
               filter === f.key
                 ? "bg-indigo-600 text-white border-indigo-600"
-                : "bg-white text-slate-600 border-slate-200 hover:border-indigo-200 hover:text-indigo-600"
+                : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-600 hover:text-indigo-600 dark:hover:text-indigo-400"
             }`}
           >
             {f.label} ({counts[f.key] ?? 0})
@@ -318,20 +316,18 @@ export default function EngineerDashboard() {
         ))}
       </div>
 
-      {/* Main grid — ticket list + AI panel side by side */}
       <div className="flex gap-5 flex-1 min-h-0">
 
-        {/* ── Left: ticket list ─────────────────────── */}
         <div className="w-72 flex-shrink-0 flex flex-col min-h-0">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden h-full">
-            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex-shrink-0">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">My Tickets</p>
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm flex flex-col overflow-hidden h-full">
+            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex-shrink-0">
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">My Tickets</p>
             </div>
             <div className="overflow-y-auto flex-1">
               {loading ? (
-                <div className="p-8 text-center text-slate-400 text-sm">Loading...</div>
+                <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-sm">Loading...</div>
               ) : active.length === 0 && done.length === 0 ? (
-                <div className="p-8 text-center text-slate-400">
+                <div className="p-8 text-center text-slate-400 dark:text-slate-500">
                   <Wrench size={28} className="mx-auto mb-2 opacity-30" />
                   <p className="text-sm">No active assignments</p>
                   <p className="text-xs mt-1">You're all caught up!</p>
@@ -340,19 +336,19 @@ export default function EngineerDashboard() {
                 <>
                   {active.length > 0 && (
                     <div>
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-4 py-2">
+                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider px-4 py-2">
                         Active ({active.length})
                       </p>
                       {active.map(t => (
                         <button
                           key={t.id}
                           onClick={() => selectTicket(t)}
-                          className={`w-full text-left px-4 py-3 border-b border-l-4 border-l-transparent border-slate-50 transition-all duration-200 ${STATUS_ROW_BG[t.status] || "hover:bg-indigo-50/60"} ${STATUS_ROW_ACCENT[t.status] || "hover:border-l-slate-300"} ${
-                            selected?.id === t.id ? "bg-indigo-50 border-l-4 border-l-indigo-500" : ""
+                          className={`w-full text-left px-4 py-3 border-b border-l-4 border-l-transparent border-slate-50 dark:border-slate-700/60 transition-all duration-200 ${STATUS_ROW_BG[t.status] || "hover:bg-indigo-50/60 dark:hover:bg-indigo-900/10"} ${STATUS_ROW_ACCENT[t.status] || "hover:border-l-slate-300"} ${
+                            selected?.id === t.id ? "bg-indigo-50 dark:bg-indigo-900/20 border-l-4 border-l-indigo-500" : ""
                           }`}
                         >
-                          <p className="text-sm font-medium text-slate-800 truncate">{t.title}</p>
-                          <p className="text-xs text-slate-400 mt-0.5 font-mono">#{t.id.slice(0, 8)}</p>
+                          <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{t.title}</p>
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 font-mono">#{t.id.slice(0, 8)}</p>
                           <div className="flex gap-1 mt-1.5 flex-wrap">
                             <Badge text={t.priority} styles={PRIORITY_STYLES} />
                             <Badge text={t.status}   styles={STATUS_STYLES} />
@@ -363,19 +359,19 @@ export default function EngineerDashboard() {
                   )}
                   {done.length > 0 && (
                     <div>
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-4 py-2 mt-1">
+                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider px-4 py-2 mt-1">
                         Resolved ({done.length})
                       </p>
                       {done.map(t => (
                         <button
                           key={t.id}
                           onClick={() => selectTicket(t)}
-                          className={`w-full text-left px-4 py-3 border-b border-l-4 border-l-transparent border-slate-50 transition-all duration-200 opacity-60 ${STATUS_ROW_BG[t.status] || "hover:bg-slate-50"} ${STATUS_ROW_ACCENT[t.status] || "hover:border-l-slate-300"} ${
-                            selected?.id === t.id ? "opacity-100 bg-slate-100" : ""
+                          className={`w-full text-left px-4 py-3 border-b border-l-4 border-l-transparent border-slate-50 dark:border-slate-700/60 transition-all duration-200 opacity-60 ${STATUS_ROW_BG[t.status] || "hover:bg-slate-50 dark:hover:bg-slate-800/60"} ${STATUS_ROW_ACCENT[t.status] || "hover:border-l-slate-300"} ${
+                            selected?.id === t.id ? "opacity-100 bg-slate-100 dark:bg-slate-700/50" : ""
                           }`}
                         >
-                          <p className="text-sm font-medium text-slate-700 truncate">{t.title}</p>
-                          <p className="text-xs text-slate-400 mt-0.5 font-mono">#{t.id.slice(0, 8)}</p>
+                          <p className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{t.title}</p>
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 font-mono">#{t.id.slice(0, 8)}</p>
                           <Badge text={t.status} styles={STATUS_STYLES} />
                         </button>
                       ))}
@@ -387,19 +383,17 @@ export default function EngineerDashboard() {
           </div>
         </div>
 
-        {/* ── Right: AI assistant panel ──────────────── */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden h-full">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm flex flex-col overflow-hidden h-full">
 
-            {/* Chat header */}
-            <div className="border-b border-slate-100 px-5 py-4 flex items-center justify-between bg-gradient-to-r from-indigo-50/50 to-white flex-shrink-0">
+            <div className="border-b border-slate-100 dark:border-slate-700 px-5 py-4 flex items-center justify-between bg-gradient-to-r from-indigo-50/50 to-white dark:from-indigo-900/10 dark:to-slate-800 flex-shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center flex-shrink-0">
                   <Brain size={20} className="text-white" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">AI Assistant</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">AI Assistant</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     {selected
                       ? `Engineer mode · ${selected.title.slice(0, 40)}${selected.title.length > 40 ? "..." : ""}`
                       : "Select a ticket to get AI-powered help"}
@@ -410,18 +404,18 @@ export default function EngineerDashboard() {
               {selected && !isResolved && (
                 <div className="flex items-center gap-2">
                   {selected.priority === "P1" && (
-                    <span className="flex items-center gap-1 text-xs text-red-600 bg-red-50 px-2 py-1 rounded-full border border-red-200">
+                    <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 px-2 py-1 rounded-full border border-red-200 dark:border-red-800">
                       <AlertTriangle size={11} /> P1 Critical
                     </span>
                   )}
-                  <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg font-mono hidden md:block">
+                  <span className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1 rounded-lg font-mono hidden md:block">
                     #{selected.id.slice(0, 8)}
                   </span>
                   <button
                     onClick={() => setShowResolve(!showResolve)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors ${
                       showResolve
-                        ? "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                        ? "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600"
                         : "bg-emerald-600 text-white hover:bg-emerald-700"
                     }`}
                   >
@@ -432,21 +426,20 @@ export default function EngineerDashboard() {
               )}
 
               {selected && isResolved && (
-                <span className="flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200 font-medium">
+                <span className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 font-medium">
                   <Check size={13} /> Resolved
                 </span>
               )}
             </div>
 
-            {/* Resolve form */}
             {showResolve && !isResolved && (
-              <div className="px-5 py-3.5 bg-emerald-50 border-b border-emerald-100 flex gap-2 items-start flex-shrink-0">
+              <div className="px-5 py-3.5 bg-emerald-50 dark:bg-emerald-900/10 border-b border-emerald-100 dark:border-emerald-800 flex gap-2 items-start flex-shrink-0">
                 <div className="flex-1">
-                  <p className="text-xs font-medium text-emerald-700 mb-1.5">Resolution notes</p>
+                  <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400 mb-1.5">Resolution notes</p>
                   <textarea
                     value={resolveText}
                     onChange={e => setResolveText(e.target.value)}
-                    className="w-full bg-white border border-emerald-200 rounded-xl px-3 py-2 text-xs text-slate-700 h-16 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                    className="w-full bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-800 rounded-xl px-3 py-2 text-xs text-slate-700 dark:text-slate-200 h-16 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300 dark:focus:ring-emerald-700"
                     placeholder="Describe the steps taken to resolve this issue..."
                   />
                 </div>
@@ -462,15 +455,14 @@ export default function EngineerDashboard() {
               </div>
             )}
 
-            {/* Messages */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
               {!selected ? (
-                <div className="text-center text-slate-400 mt-20">
-                  <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mx-auto mb-4">
-                    <Brain size={28} className="text-indigo-300" />
+                <div className="text-center text-slate-400 dark:text-slate-500 mt-20">
+                  <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center mx-auto mb-4">
+                    <Brain size={28} className="text-indigo-300 dark:text-indigo-500" />
                   </div>
-                  <p className="text-sm font-medium text-slate-500">Select a ticket to start</p>
-                  <p className="text-xs mt-1 text-slate-400 max-w-xs mx-auto">
+                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Select a ticket to start</p>
+                  <p className="text-xs mt-1 text-slate-400 dark:text-slate-500 max-w-xs mx-auto">
                     Click any ticket — I'll load its context instantly. Then ask me anything:
                     summaries, next steps, commands, root cause analysis.
                   </p>
@@ -479,16 +471,16 @@ export default function EngineerDashboard() {
                 <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div className="flex items-end gap-2 max-w-[85%]">
                     {m.role === "assistant" && (
-                      <div className="w-8 h-8 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0 mb-1">
-                        <Brain size={14} className="text-indigo-600" />
+                      <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0 mb-1">
+                        <Brain size={14} className="text-indigo-600 dark:text-indigo-400" />
                       </div>
                     )}
                     <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
                       m.role === "user"
                         ? "bg-indigo-600 text-white rounded-br-sm"
                         : m.isContext
-                        ? "bg-slate-50 text-slate-700 rounded-bl-sm border border-slate-200 font-mono text-xs"
-                        : "bg-white text-slate-700 rounded-bl-sm border border-slate-100"
+                        ? "bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-300 rounded-bl-sm border border-slate-200 dark:border-slate-700 font-mono text-xs"
+                        : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-bl-sm border border-slate-100 dark:border-slate-700"
                     }`}>
                       {m.content
                         ? <span className="whitespace-pre-wrap">{m.content}</span>
@@ -500,10 +492,9 @@ export default function EngineerDashboard() {
               ))}
             </div>
 
-            {/* Input */}
-            <div className="border-t border-slate-100 p-4 flex gap-2 bg-white flex-shrink-0">
+            <div className="border-t border-slate-100 dark:border-slate-700 p-4 flex gap-2 bg-white dark:bg-slate-800 flex-shrink-0">
               <input
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:bg-white focus:border-indigo-200 transition-all"
+                className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-800 focus:bg-white dark:focus:bg-slate-800 focus:border-indigo-200 dark:focus:border-indigo-700 transition-all"
                 placeholder={
                   selected
                     ? "Ask anything — summarize, next steps, commands, root cause..."

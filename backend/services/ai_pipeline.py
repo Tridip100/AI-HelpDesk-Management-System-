@@ -1,20 +1,22 @@
 # backend/services/ai_pipeline.py
 #
-# AI Pipeline — updated
-# Changes:
-#   1. Intent detection — greeting/escalate/followup/new_problem
-#   2. Solution cache check before LLM call
-#   3. Single model (qwen2.5) — no more phi3 draft step
-#   4. Follow-up context enrichment — re-routes with full history
+# AI Pipeline — redesigned
+#
+# Key fix: when a user says "that didn't work" / "no" on a follow-up,
+# we now explicitly tell the LLM what was already suggested and instruct
+# it to provide DIFFERENT troubleshooting steps — not just re-describe
+# the same problem and let the LLM repeat itself.
 
 import logging
 import re
+import json
 from typing import AsyncGenerator, Optional
 
 from backend.services import nlp_services as nlp_service
 from backend.services import rag_service
 from backend.services import llm_services as llm_service
 from backend.services.solution_cache_service import get_cached_solution, store_solution
+from backend.services.llm_services import extract_confidence
 
 logger = logging.getLogger(__name__)
 
@@ -36,21 +38,42 @@ ESCALATION_PATTERNS = [
     r"(can't|cannot|couldn't).{0,30}(fix|resolve|solve)",
 ]
 
-FOLLOWUP_PATTERNS = [
-    r"^(ok|okay|i see|thanks|thank you|got it|alright|sure|yes|no|nope|yep|done)[\s.,!?]*$",
+# "Negative follow-up" — user tried the suggestion and it FAILED.
+# This is the most important category — it must trigger a DIFFERENT
+# answer, not a repeat.
+NEGATIVE_FOLLOWUP_PATTERNS = [
+    r"^no\b",
+    r"^nope\b",
+    r"^nah\b",
+    r"(i\s*(have\s*)?(already\s*)?tried)",
+    r"(already tried|done that|did that)",
+    r"(still not|still doesn'?t|still isn'?t|still won'?t)",
+    r"(didn'?t work|doesn'?t work|does not work|did not work)",
+    r"(same error|same issue|same problem)",
+    r"(not (helping|working|fixed|resolved))",
+]
+
+# Neutral follow-up — clarifying question, not a failure report
+NEUTRAL_FOLLOWUP_PATTERNS = [
+    r"^(ok|okay|i see|got it|alright|sure)[\s.,!?]*$",
     r"(what next|next step|what should i do|what do i do now|what else)",
-    r"(i tried|already tried|done that|still not|didn't work|not working|same error|same issue)",
     r"(can you|could you|please).{0,30}(explain|clarify|elaborate|more detail|step by step)",
     r"(summarize|summary|recap|explain again|what was the)",
-    r"(still|again|another).{0,20}(error|issue|problem|not working)",
     r"^(why|how|when|what|where).{0,50}\?$",
+]
+
+POSITIVE_FOLLOWUP_PATTERNS = [
+    r"^yes\b", r"^yep\b", r"^yup\b", r"^yeah\b",
+    r"(that worked|it worked|fixed it|solved it|resolved it)",
+    r"(thank you|thanks)",
 ]
 
 
 def detect_intent(message: str, has_history: bool) -> str:
     """
     Classify message before running NLP pipeline.
-    Returns: greeting | escalate | followup | new_problem
+    Returns: greeting | escalate | negative_followup | neutral_followup |
+             positive_followup | new_problem
     """
     msg = message.strip().lower()
 
@@ -63,11 +86,37 @@ def detect_intent(message: str, has_history: bool) -> str:
             return "escalate"
 
     if has_history:
-        for p in FOLLOWUP_PATTERNS:
+        for p in NEGATIVE_FOLLOWUP_PATTERNS:
             if re.search(p, msg):
-                return "followup"
+                return "negative_followup"
+        for p in POSITIVE_FOLLOWUP_PATTERNS:
+            if re.search(p, msg):
+                return "positive_followup"
+        for p in NEUTRAL_FOLLOWUP_PATTERNS:
+            if re.search(p, msg):
+                return "neutral_followup"
 
     return "new_problem"
+
+
+def _extract_last_ai_suggestion(conversation: list) -> str:
+    """Pull the most recent assistant message from conversation history."""
+    if not conversation:
+        return ""
+    for msg in reversed(conversation):
+        if msg.get("role") == "assistant":
+            return msg.get("content", "")
+    return ""
+
+
+def _extract_original_problem(conversation: list, fallback: str) -> str:
+    """Pull the first user message — the original problem statement."""
+    if not conversation:
+        return fallback
+    for msg in conversation:
+        if msg.get("role") == "user":
+            return msg.get("content", fallback)
+    return fallback
 
 
 # ─────────────────────────────────────────
@@ -78,13 +127,18 @@ async def run_streaming(
     conversation: list = None,
 ) -> AsyncGenerator[dict, None]:
     """
-    Main AI pipeline with intent detection and solution cache.
+    Main AI pipeline.
 
     Flow:
-      greeting   → immediate reply, no pipeline
-      escalate   → low confidence → triggers ticket creation
-      followup   → enrich with history context → pipeline
-      new_problem → check cache → NLP → RAG → qwen2.5
+      greeting           → immediate reply, no pipeline
+      escalate           → triggers ticket creation directly
+      negative_followup  → "that didn't work" → re-run pipeline with
+                            explicit instruction to give a DIFFERENT
+                            answer than the last suggestion
+      neutral_followup    → clarifying question → re-run with context
+      positive_followup   → "thanks, that worked" → handled by chat.py's
+                            confirmation flow, shouldn't normally reach here
+      new_problem         → check cache → NLP → RAG → qwen2.5
     """
     has_history = bool(conversation and len(conversation) > 0)
     intent      = detect_intent(message, has_history)
@@ -117,63 +171,82 @@ async def run_streaming(
         }
         return
 
-    # ── Follow-up — enrich message with conversation context ─
-    effective_message = message
-    if intent == "followup" and conversation:
-        first_user = next(
-            (m["content"] for m in conversation if m["role"] == "user"), ""
+    # ── Build effective message based on intent ──────────────
+    original_problem = _extract_original_problem(conversation, message)
+    last_suggestion   = _extract_last_ai_suggestion(conversation)
+
+    if intent == "negative_followup":
+        # CRITICAL: explicitly tell the LLM the previous suggestion FAILED
+        # and demand a different approach. This is what prevents the loop.
+        effective_message = (
+            f"ORIGINAL PROBLEM: {original_problem[:400]}\n\n"
+            f"PREVIOUSLY SUGGESTED (DID NOT WORK): {last_suggestion[:400]}\n\n"
+            f"The user says this did NOT fix the issue. "
+            f"Do NOT repeat the same suggestion. Provide a DIFFERENT, "
+            f"more advanced troubleshooting step or a deeper diagnostic. "
+            f"If you have already given 2+ failed suggestions, recommend "
+            f"escalating to a human engineer instead of trying more steps."
         )
-        if first_user and first_user != message:
-            effective_message = (
-                f"Original problem: {first_user[:300]}\n"
-                f"Follow-up question: {message}"
-            )
-            logger.info(f"[PIPELINE] Follow-up enriched with original context")
+        logger.info("[PIPELINE] Negative followup — instructing LLM to avoid repetition")
 
-    # ── Solution cache check ──────────────────────────────────
-    yield {"type": "status", "stage": "cache_check", "label": "Checking previous solutions..."}
+    elif intent == "neutral_followup":
+        effective_message = (
+            f"ORIGINAL PROBLEM: {original_problem[:400]}\n\n"
+            f"PREVIOUS ANSWER: {last_suggestion[:400]}\n\n"
+            f"User's follow-up question: {message}"
+        )
 
-    cache_hit = get_cached_solution(effective_message)
-    if cache_hit:
-        logger.info(f"[PIPELINE] Cache hit — skipping NLP/RAG/LLM")
-        yield {"type": "status", "stage": "thinking", "label": "Generating your answer..."}
+    else:
+        effective_message = message
 
-        nlp_result = nlp_service.analyze(effective_message[:300])
+    # ── Solution cache check (only for genuinely new problems) ──
+    if intent == "new_problem":
+        yield {"type": "status", "stage": "cache_check", "label": "Checking previous solutions..."}
 
-        yield {
-            "type":                "result",
-            "tier":                "cache",
-            "response":            cache_hit["solution"],
-            "confidence":          cache_hit["confidence"],
-            "nlp":                 nlp_result,
-            "should_create_ticket": False,
-            "from_cache":          True,
-        }
-        return
+        cache_hit = get_cached_solution(effective_message)
+        if cache_hit:
+            logger.info("[PIPELINE] Cache hit — skipping NLP/RAG/LLM")
+            yield {"type": "status", "stage": "thinking", "label": "Generating your answer..."}
+
+            nlp_result = nlp_service.analyze(effective_message[:300])
+
+            yield {
+                "type":                "result",
+                "tier":                "cache",
+                "response":            cache_hit["solution"],
+                "confidence":          cache_hit["confidence"],
+                "nlp":                 nlp_result,
+                "should_create_ticket": False,
+                "from_cache":          True,
+            }
+            return
 
     # ── Full pipeline ─────────────────────────────────────────
     yield {"type": "status", "stage": "analyzing", "label": "Reading your message..."}
 
-    nlp_result = nlp_service.analyze(effective_message[:500])
+    # For follow-ups, classify based on the ORIGINAL problem (more stable
+    # category/tier) but keep the enriched effective_message for the LLM
+    classify_text = original_problem if intent != "new_problem" else effective_message
+    nlp_result = nlp_service.analyze(classify_text[:500])
 
     logger.info(
         f"[PIPELINE] tier={nlp_result.tier} category={nlp_result.category} "
         f"priority={nlp_result.priority}"
     )
 
-    yield {
-        "type":  "status",
-        "stage": "knowledge_base",
-        "label": "Searching IT knowledge base...",
-    }
+    yield {"type": "status", "stage": "knowledge_base", "label": "Searching IT knowledge base..."}
 
     nlp_summary = (
         f"[{nlp_result.priority}][{nlp_result.severity.upper()}] "
-        f"{nlp_result.category} issue. {effective_message[:300]}"
+        f"{nlp_result.category} issue. {effective_message[:600]}"
     )
 
-    # Tier 1 / Tier 3a — simple, answer directly
-    if nlp_result.tier in ("tier1", "tier3a"):
+    # Force tier2 (full RAG+LLM) for negative follow-ups — these need
+    # real reasoning, not a quick canned tier1 answer
+    effective_tier = "tier2" if intent == "negative_followup" else nlp_result.tier
+
+    # ── Tier 1 / Tier 3a — simple, answer directly ────────────
+    if effective_tier in ("tier1", "tier3a"):
         yield {"type": "status", "stage": "thinking", "label": "Generating your answer..."}
 
         result = await llm_service.generate(
@@ -185,13 +258,13 @@ async def run_streaming(
         response   = result["response"]
         confidence = result["confidence"]
 
-        if confidence >= 0.75:
+        if confidence >= 0.75 and intent == "new_problem":
             store_solution(effective_message, response, confidence,
                            nlp_result.category, nlp_result.priority)
 
         yield {
             "type":                "result",
-            "tier":                nlp_result.tier,
+            "tier":                effective_tier,
             "response":            response,
             "confidence":          confidence,
             "nlp":                 nlp_result,
@@ -199,8 +272,8 @@ async def run_streaming(
         }
         return
 
-    # Tier 2 — RAG + optional web search + qwen2.5
-    rag_result     = await rag_service.search(nlp_summary)
+    # ── Tier 2 — RAG + optional web search + qwen2.5 ──────────
+    rag_result     = rag_service.search(nlp_summary)
     rag_context    = rag_result.get("context")
     rag_confidence = rag_result.get("confidence", 0)
 
@@ -209,8 +282,8 @@ async def run_streaming(
         try:
             from backend.services.sanitizer_service import build_safe_query
             from backend.services.tavily_service import search as tavily_search
-            safe_query     = build_safe_query(nlp_result)
-            tavily_result  = await tavily_search(safe_query)
+            safe_query    = build_safe_query(nlp_result)
+            tavily_result = await tavily_search(safe_query)
             tavily_context = tavily_result.get("context")
             if tavily_context:
                 yield {"type": "status", "stage": "web_search", "label": "Searching the web..."}
@@ -219,8 +292,9 @@ async def run_streaming(
 
     yield {"type": "status", "stage": "thinking", "label": "Generating your answer..."}
 
-    # Single LLM call — qwen2.5 handles everything
     full_response = ""
+    last_chunk    = ""
+
     async for token in llm_service.generate_stream(
         nlp_summary    = nlp_summary,
         rag_context    = rag_context,
@@ -228,34 +302,31 @@ async def run_streaming(
         conversation   = conversation,
         raw_message    = effective_message,
     ):
+        last_chunk = token
         if token.startswith('{"type"'):
-            try:
-                parsed     = json_parse(token)
-                confidence = parsed.get("value", 0.55)
-            except Exception:
-                confidence = 0.55
             break
         full_response += token
 
-    import json as _json
-    try:
-        confidence = _json.loads(token).get("value", 0.55) if token.startswith('{"type"') else 0.55
-    except Exception:
-        confidence = 0.55
+    confidence = 0.55
+    if last_chunk.startswith('{"type"'):
+        try:
+            confidence = json.loads(last_chunk).get("value", 0.55)
+        except Exception:
+            pass
 
-    from backend.services.llm_services import extract_confidence
-    clean_response, confidence = extract_confidence(full_response)
+    clean_response, extracted_confidence = extract_confidence(full_response)
+    confidence = extracted_confidence
 
-    if confidence >= 0.75:
+    if confidence >= 0.75 and intent == "new_problem":
         store_solution(effective_message, clean_response, confidence,
                        nlp_result.category, nlp_result.priority)
 
         if tavily_context:
             try:
                 rag_service.store_web_result(
-                    query    = effective_message[:200],
-                    content  = tavily_context,
-                    category = nlp_result.category,
+                    query          = effective_message[:200],
+                    tavily_context = tavily_context,
+                    category       = nlp_result.category,
                 )
             except Exception as e:
                 logger.warning(f"[PIPELINE] Failed to store web result: {e}")
@@ -268,11 +339,6 @@ async def run_streaming(
         "nlp":                 nlp_result,
         "should_create_ticket": confidence <= CONFIDENCE_THRESHOLD,
     }
-
-
-def json_parse(s: str) -> dict:
-    import json
-    return json.loads(s)
 
 
 # ─────────────────────────────────────────

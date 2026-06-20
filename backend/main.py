@@ -6,6 +6,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 
 from backend.database import engine, Base
 from backend.routers import auth, tickets, admin
@@ -22,6 +23,19 @@ logger = logging.getLogger(__name__)
 
 # create all tables on startup
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_department_column():
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    if any(column["name"] == "department" for column in inspector.get_columns("users")):
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN department VARCHAR"))
+
+
+ensure_department_column()
 
 
 # ─────────────────────────────────────────

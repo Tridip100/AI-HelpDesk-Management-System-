@@ -15,9 +15,9 @@ const STAGE_ICON = {
 function TypingDots() {
   return (
     <span className="inline-flex gap-1">
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:120ms]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:240ms]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 dark:bg-slate-500" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 dark:bg-slate-500 [animation-delay:120ms]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 dark:bg-slate-500 [animation-delay:240ms]" />
     </span>
   );
 }
@@ -196,13 +196,13 @@ export default function ChatView({ mode, onTicketCreated }) {
 
   if (mode === "voice") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#eef3f9] p-6">
-        <div className="w-full max-w-[370px] rounded-xl border border-slate-200 bg-white p-8 text-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#eef3f9] dark:bg-slate-900 p-6">
+        <div className="w-full max-w-[370px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-8 text-center">
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#4034aa] text-white">
             <IconPhone width={34} height={34} />
           </div>
-          <h1 className="mt-5 text-xl font-semibold">Voice Support</h1>
-          <p className="mt-3 text-sm text-slate-500">Connect with a support agent via voice call</p>
+          <h1 className="mt-5 text-xl font-semibold text-slate-900 dark:text-slate-100">Voice Support</h1>
+          <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Connect with a support agent via voice call</p>
           <button
             onClick={recording ? stopRecording : startRecording}
             className="mt-7 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 text-sm font-semibold text-white hover:bg-emerald-600"
@@ -216,37 +216,37 @@ export default function ChatView({ mode, onTicketCreated }) {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-[#eef3f9]">
-      <header className="flex h-[76px] items-center justify-between border-b border-slate-200 bg-white px-6">
+    <div className="flex h-screen flex-col bg-[#eef3f9] dark:bg-slate-900">
+      <header className="flex h-[76px] items-center justify-between border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-6">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-500 text-white">
             <IconChat width={19} height={19} />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold">Live Chat Support</h1>
-            <p className="text-xs text-slate-500">Helpdesk team · Typically replies in minutes</p>
+            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Live Chat Support</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Helpdesk team · Typically replies in minutes</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs font-medium text-emerald-600">
+        <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
           <span className="h-2 w-2 rounded-full bg-emerald-400" />
           Online
         </div>
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
-        <div className="mx-auto mb-6 w-fit rounded-full bg-slate-200 px-4 py-1 text-xs text-slate-500">
+        <div className="mx-auto mb-6 w-fit rounded-full bg-slate-200 dark:bg-slate-700 px-4 py-1 text-xs text-slate-500 dark:text-slate-300">
           Welcome to HelpDesk Live Chat! A support agent will be with you shortly.
         </div>
         <div className="mx-auto max-w-4xl space-y-4">
           {messages.map((message, index) => (
             <div key={index} className={message.role === "user" ? "flex justify-end" : "flex justify-start"}>
               {message.role === "system" ? (
-                <div className="mx-auto flex items-center gap-2 rounded-full bg-slate-200 px-3 py-1 text-xs text-slate-600">
+                <div className="mx-auto flex items-center gap-2 rounded-full bg-slate-200 dark:bg-slate-700 px-3 py-1 text-xs text-slate-600 dark:text-slate-300">
                   <IconTicket width={13} height={13} />
                   {message.content}
                 </div>
               ) : (
-                <div className={`max-w-xl rounded-xl border px-4 py-3 text-sm leading-6 ${message.role === "user" ? "border-indigo-500 bg-indigo-500 text-white" : "border-slate-200 bg-white text-slate-900"}`}>
+                <div className={`max-w-xl rounded-xl border px-4 py-3 text-sm leading-6 ${message.role === "user" ? "border-indigo-500 bg-indigo-500 text-white" : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"}`}>
                   {renderContent(message.content)}
                 </div>
               )}
@@ -255,17 +255,17 @@ export default function ChatView({ mode, onTicketCreated }) {
           {thinking && (
             <div className="flex justify-start">
               <div className="flex items-end gap-2 max-w-[80%]">
-                <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                  <Brain size={14} className="text-indigo-600" />
+                <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                  <Brain size={14} className="text-indigo-600 dark:text-indigo-400" />
                 </div>
-                <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-white border border-slate-200 shadow-sm min-w-[220px]">
+                <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm min-w-[220px]">
                   {statusSteps.length === 0 ? <TypingDots /> : (
                     <div className="space-y-1.5">
                       {statusSteps.map((s, i) => {
                         const Icon   = STAGE_ICON[s.stage] || Brain;
                         const isLast = i === statusSteps.length - 1;
                         return (
-                          <div key={i} className={`flex items-center gap-2 text-xs transition-all ${isLast ? "text-slate-700" : "text-slate-400"}`}>
+                          <div key={i} className={`flex items-center gap-2 text-xs transition-all ${isLast ? "text-slate-700 dark:text-slate-300" : "text-slate-400 dark:text-slate-500"}`}>
                             {isLast ? (
                               <Icon size={12} className="text-indigo-400 flex-shrink-0" />
                             ) : (
@@ -292,10 +292,10 @@ export default function ChatView({ mode, onTicketCreated }) {
         </div>
       </div>
 
-      <footer className="border-t border-slate-200 bg-white p-4">
+      <footer className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
         <div className="flex items-center gap-2">
           <input
-            className="h-10 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            className="h-10 flex-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900"
             placeholder="Type your message..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -315,7 +315,7 @@ export default function ChatView({ mode, onTicketCreated }) {
           />
           <button
             onClick={() => fileRef.current?.click()}
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
             title="Attach screenshot"
           >
             <IconWrench width={17} height={17} />

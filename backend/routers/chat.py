@@ -29,17 +29,17 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # ─────────────────────────────────────────
 # POSITIVE / NEGATIVE confirmation patterns
 # ─────────────────────────────────────────
+
 POSITIVE_REPLIES = [
     "yes", "yep", "yeah", "yup", "solved", "fixed", "resolved",
-    "works", "working", "it works", "thank you", "thanks", "great",
-    "perfect", "awesome", "excellent", "done", "sorted", "all good",
-    "that worked", "it worked", "problem solved",
+    "it works now", "that worked", "it worked", "problem solved",
+    "thank you", "thanks", "perfect", "all good", "sorted", "done",
 ]
 NEGATIVE_REPLIES = [
-    "no", "nope", "nah", "still", "not working", "not fixed",
-    "not resolved", "didn't work", "same issue", "same error",
-    "still broken", "still not", "doesn't work", "does not work",
-    "not yet", "negative",
+    "no", "nope", "nah", "still not", "still doesn't",
+    "not working", "not fixed", "not resolved", "didn't work",
+    "doesn't work", "does not work", "same issue", "same error",
+    "still broken", "not yet",
 ]
 
 
@@ -85,8 +85,8 @@ async def chat_message(
     # ─────────────────────────────────────────
     if getattr(session, "awaiting_confirmation", False):
         user_msg    = request.message.strip().lower()
-        is_positive = any(p in user_msg for p in POSITIVE_REPLIES)
         is_negative = any(p in user_msg for p in NEGATIVE_REPLIES)
+        is_positive = (not is_negative) and any(p in user_msg for p in POSITIVE_REPLIES)
 
         session.awaiting_confirmation = False
 

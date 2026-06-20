@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -47,8 +48,9 @@ function RoleDashboard() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
 
         <Routes>
 
@@ -140,7 +142,8 @@ export default function App() {
 
         </Routes>
 
-      </AuthProvider>
-    </BrowserRouter>
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }

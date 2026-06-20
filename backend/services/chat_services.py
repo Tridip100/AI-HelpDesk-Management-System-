@@ -224,42 +224,44 @@ async def build_context_for_llm(session: ChatSession) -> tuple[list, str]:
 # Should this conversation become a ticket?
 # ─────────────────────────────────────────
 def should_escalate(session: ChatSession, confidence: float) -> tuple[bool, str]:
-    """
-    Decide if conversation should escalate to a ticket.
-
-    Returns: (should_escalate, reason)
-
-    Escalation triggers:
-      1. Confidence below 0.5 after full pipeline
-      2. Turn limit reached (8 turns)
-      3. User explicitly says "talk to human" / "raise ticket"
-      4. AI said "escalating" in last response
-    """
-    # Turn limit
     if session.is_at_limit():
         return True, f"Turn limit reached ({MAX_TURNS} turns)"
 
-    # Low confidence
     if confidence < 0.5:
         return True, f"AI confidence too low ({confidence})"
 
-    # Check last user message for explicit escalation request
+    # Safety net — if AI still repeated itself despite the new prompting,
+    # escalate immediately rather than looping further
+    ai_turns = [t.content for t in session.turns if t.role == "assistant"]
+    if len(ai_turns) >= 2:
+        last_two = ai_turns[-2:]
+        if last_two[0][:100] == last_two[1][:100]:
+            return True, "AI gave a repeated response — escalating"
+
     if session.turns:
         last_user_msg = next(
-            (t.content.lower() for t in reversed(session.turns)
-             if t.role == "user"),
-            ""
+            (t.content.lower() for t in reversed(session.turns) if t.role == "user"), ""
         )
         escalation_phrases = [
             "talk to human", "talk to agent", "human agent",
-            "raise ticket", "create ticket", "helpdesk",
-            "speak to someone", "real person", "not helpful"
+            "raise ticket", "raise a ticket", "raise the ticket",
+            "create ticket", "create a ticket",
+            "helpdesk", "speak to someone", "real person", "not helpful",
         ]
         if any(phrase in last_user_msg for phrase in escalation_phrases):
-            return True, "User requested human agent"
+            return True, "User requested escalation"
+
+        recent_user_msgs = [
+            t.content.lower().strip() for t in session.turns[-6:] if t.role == "user"
+        ]
+        no_count = sum(
+            1 for m in recent_user_msgs
+            if m in ("no", "nope", "nah") or m.startswith("no ")
+        )
+        if no_count >= 3:  # raised threshold — give the new prompting a chance first
+            return True, "Multiple unsuccessful attempts — escalating"
 
     return False, ""
-
 
 # ─────────────────────────────────────────
 # SESSION STATS — for debugging

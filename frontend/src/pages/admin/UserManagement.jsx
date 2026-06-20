@@ -138,6 +138,160 @@ function PasswordDropdown({ user, onClose, onSave }) {
   );
 }
 
+function CreateUserModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({ username: "", email: "", full_name: "", password: "", role: "user", department: "" });
+  const [show, setShow] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 80); }, []);
+
+  const strength = strengthLabel(form.password);
+  const canCreate = form.username.trim() && form.email.trim() && form.full_name.trim() && form.password.length >= 6;
+
+  const handleCreate = async () => {
+    if (!canCreate) return;
+    setError("");
+    setCreating(true);
+    try {
+      const res = await client.post("/admin/users", form);
+      onCreated(res.data);
+    } catch (e) {
+      setError(e.response?.data?.detail || "Failed to create user");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Create New User</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Add a new account to the system</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-3">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl">{error}</div>
+          )}
+
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Username</p>
+            <input
+              ref={inputRef}
+              value={form.username}
+              onChange={e => setForm({ ...form, username: e.target.value })}
+              placeholder="e.g. john.doe"
+              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Full Name</p>
+            <input
+              value={form.full_name}
+              onChange={e => setForm({ ...form, full_name: e.target.value })}
+              placeholder="e.g. John Doe"
+              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Email</p>
+            <input
+              type="email"
+              value={form.email}
+              onChange={e => setForm({ ...form, email: e.target.value })}
+              placeholder="e.g. john@company.com"
+              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Role</p>
+            <select
+              value={form.role}
+              onChange={e => setForm({ ...form, role: e.target.value })}
+              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="user">User</option>
+              <option value="helpdesk">Helpdesk</option>
+              <option value="engineer">Engineer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Department</p>
+            <input
+              value={form.department}
+              onChange={e => setForm({ ...form, department: e.target.value })}
+              placeholder="e.g. Engineering, Sales, IT"
+              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1.5">Password</p>
+            <div className="relative">
+              <input
+                type={show ? "text" : "password"}
+                value={form.password}
+                onChange={e => setForm({ ...form, password: e.target.value })}
+                onKeyDown={e => e.key === "Enter" && handleCreate()}
+                placeholder="Min 6 characters"
+                className="w-full bg-white border border-slate-300 rounded-xl pl-3 pr-10 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button type="button" onClick={() => setShow(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                {show ? (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                )}
+              </button>
+            </div>
+            {form.password.length > 0 && strength && (
+              <div className="space-y-1 mt-2">
+                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-300 ${strength.color}`} style={{ width: strength.width }} />
+                </div>
+                <p className="text-xs text-slate-400">Strength: <span className="font-medium text-slate-600">{strength.label}</span></p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 flex gap-2">
+          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={!canCreate || creating}
+            className="flex-1 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
+          >
+            {creating ? "Creating…" : "Create User"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UserDetailsModal({ user, users, tickets, onClose }) {
   if (!user) return null;
 
@@ -318,6 +472,7 @@ export default function AdminUserManagement() {
   const [resetting, setResetting] = useState(null);
   const [saving, setSaving]     = useState(false);
   const [msg, setMsg]           = useState("");
+  const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -392,12 +547,19 @@ export default function AdminUserManagement() {
     setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: !u.is_active } : u));
   };
 
+  const handleUserCreated = (newUser) => {
+    setUsers(prev => [...prev, newUser]);
+    setShowCreate(false);
+    showMsg(`User "${newUser.username}" created successfully`);
+  };
+
   // role counts for stat cards
   const roleCounts = users.reduce((acc, u) => { acc[u.role] = (acc[u.role] || 0) + 1; return acc; }, {});
 
   return (
     <div className="w-full">
       <UserDetailsModal user={selectedUser} users={users} tickets={tickets} onClose={() => setSelectedUser(null)} />
+      {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} onCreated={handleUserCreated} />}
 
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
@@ -405,7 +567,7 @@ export default function AdminUserManagement() {
           <h1 className="text-3xl font-bold text-slate-900">User Management</h1>
           <p className="text-sm text-slate-500 mt-1">{users.length} users in the system</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {msg && (
             <span className="text-sm text-emerald-600 font-medium bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">✓ {msg}</span>
           )}
@@ -420,6 +582,15 @@ export default function AdminUserManagement() {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 bg-indigo-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Create User
+          </button>
         </div>
       </div>
 
@@ -492,7 +663,6 @@ export default function AdminUserManagement() {
               <tr><td colSpan={6} className="text-center py-16 text-slate-500">No users found</td></tr>
             ) : filtered.map(u => (
               <tr key={u.id} onClick={() => setSelectedUser(u)} className="hover:bg-slate-50 transition-colors relative group cursor-pointer">
-                {/* Name */}
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0
@@ -506,13 +676,10 @@ export default function AdminUserManagement() {
                   </div>
                 </td>
 
-                {/* Email */}
                 <td className="px-6 py-4 text-slate-600">{u.email}</td>
 
-                {/* Department */}
                 <td className="px-6 py-4 text-slate-600">{u.department || "Unassigned"}</td>
 
-                {/* Status */}
                 <td className="px-6 py-4">
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleActive(u); }}
@@ -526,7 +693,6 @@ export default function AdminUserManagement() {
                   </button>
                 </td>
 
-                {/* Role */}
                 <td className="px-6 py-4">
                   {editing === u.id ? (
                     <div className="flex items-center gap-2">
@@ -561,7 +727,6 @@ export default function AdminUserManagement() {
                   )}
                 </td>
 
-                {/* Password */}
                 <td className="px-6 py-4 relative" data-pwd-dropdown>
                   <button
                     onClick={(e) => { e.stopPropagation(); setResetting(resetting === u.id ? null : u.id); setEditing(null); }}

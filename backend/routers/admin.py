@@ -12,9 +12,20 @@ from backend.models.ticket import Ticket, TicketStatus
 from backend.models.ticket_event import TicketEvent
 from datetime import datetime, timedelta
 from backend.middleware.rbac import current_user_admin, current_user_helpdesk_or_above
+from backend.services.auth_service import hash_password
+import uuid
+
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+class UserCreateRequest(BaseModel):
+    username:  str
+    email:     str
+    full_name: str
+    password:  str
+    role:      UserRole
+    department: Optional[str] = None
 
 
 class UserOut(BaseModel):
@@ -23,6 +34,7 @@ class UserOut(BaseModel):
     username: str
     full_name: str
     role: UserRole
+    department: Optional[str] = None
     is_active: bool
 
     class Config:
@@ -33,6 +45,7 @@ class UpdateUserRequest(BaseModel):
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     full_name: Optional[str] = None
+    department: Optional[str] = None
 
 
 class ResetPasswordRequest(BaseModel):
@@ -66,6 +79,8 @@ def update_user(
         user.is_active = req.is_active
     if req.full_name is not None:
         user.full_name = req.full_name
+    if req.department is not None:
+        user.department = req.department
 
     db.commit()
     db.refresh(user)
@@ -342,3 +357,37 @@ def learning_stats(
         "sop_chunks_size":       stats.get("sop_documents", 0),  # FIXED key source
         "recently_learned":      recent_learned,
     }
+
+
+
+@router.post("/users", response_model=UserOut, status_code=201)
+def create_user(
+    req: UserCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(current_user_admin),
+):
+    """Admin only — create a new user account."""
+    existing = db.query(User).filter(
+        (User.username == req.username) | (User.email == req.email)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username or email already exists")
+
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    user = User(
+        id=str(uuid.uuid4()),
+        username=req.username,
+        email=req.email,
+        full_name=req.full_name,
+        hashed_password= hash_password(req.password),
+        role=req.role,
+        department=req.department,
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return user

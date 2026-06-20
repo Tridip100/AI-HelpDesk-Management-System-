@@ -240,7 +240,7 @@ export default function AdminDashboard() {
           <button
             onClick={fetchDigest}
             disabled={loadingDigest}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition shadow-sm disabled:opacity-50"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white theme-text-white px-5 py-2.5 rounded-xl text-sm font-medium transition shadow-sm disabled:opacity-50"
           >
             {loadingDigest ? "Generating..." : "Generate Shift Digest"}
           </button>
